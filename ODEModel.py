@@ -33,17 +33,19 @@ class ODEfunc(nn.Module):
     def __init__(self):
         super(ODEfunc, self).__init__()
         # Define network layers.
-        n_freq = 100; # frequencies to sample spacetime in.
+#         n_freq = 100; sigmac = 20; # frequencies to sample spacetime in.
+        n_freq = 0; sigmac = 20; # frequencies to sample spacetime in.
+        
         Z_DIM = 2; # dimension of vector field.
-        imap = InputMapping(Z_DIM, n_freq, sigma=20);
+        imap = InputMapping(Z_DIM, n_freq, sigma=sigmac);
         self.imap = imap; # save for sigma params
 #         pdb.set_trace()
         self.f = nn.Sequential(imap,
-                       nn.Linear(imap.d_out, 256),
+                       nn.Linear(imap.d_out, 512),
                        nn.Softplus(),
-                       nn.Linear(256, 256),
+                       nn.Linear(512, 512),
                        nn.Softplus(),
-                       nn.Linear(256, Z_DIM));
+                       nn.Linear(512, Z_DIM));
 
     def get_z_dot(self, t, z):
         """z_dot is parameterized by a NN: z_dot = NN(t, z(t))"""

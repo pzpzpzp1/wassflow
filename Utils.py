@@ -22,7 +22,7 @@ import os
 
 class ImageDataset():
     #"""Sample from a distribution defined by an image."""
-    def __init__(self, img, MAX_VAL=4.0, thresh=0):
+    def __init__(self, img, MAX_VAL=.5, thresh=0):
         img[img<thresh]=0; # threshold to cut empty region of image
         h, w = img.shape
         xx = np.linspace(-MAX_VAL, MAX_VAL, w)
@@ -33,9 +33,11 @@ class ImageDataset():
         self.means = np.concatenate([xx, yy], 1)
         self.probs = img.reshape(-1); 
         self.probs /= self.probs.sum();
-        self.noise_std = np.array([MAX_VAL/w, MAX_VAL/h])
+#         self.noise_std = np.array([MAX_VAL/w, MAX_VAL/h])
+        self.noise_std = np.array([.01,.01])*0;
+#         print(self.noise_std)
 
-    def sample(self, batch_size=512, normalize = False):
+    def sample(self, batch_size=512):
         inds = np.random.choice(int(self.probs.shape[0]), int(batch_size), p=self.probs)
         m = self.means[inds]
         samples = np.random.randn(*m.shape) * self.noise_std + m
@@ -128,7 +130,8 @@ class BoundingBox():
 class InputMapping(nn.Module):
     def __init__(self, d_in, n_freq, sigma=2):
         super().__init__()
-        self.B = nn.Parameter(torch.randn(n_freq, d_in) * sigma, requires_grad=False).to(device)
+        self.B = nn.Parameter(torch.randn(n_freq, d_in) * sigma/np.sqrt(d_in)/2.0, requires_grad=False).to(device) # gaussian
+#         self.B = nn.Parameter((torch.rand(n_freq, d_in)-.5) * 2 * sigma/np.sqrt(d_in), requires_grad=False).to(device) # uniform
         self.d_in = d_in;
         self.n_freq = n_freq;
 #         self.d_out = n_freq * 2 + d_in - 1;

@@ -52,7 +52,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
 
 #     model = FfjordModel(); 
     model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=2e-6, weight_decay=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-5, weight_decay=1e-5)
     T = z_target_full.shape[0];
 
 #     # get spacetime bounding box and spacetime sample grid
@@ -83,7 +83,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         for i in range(fullshape[0]):
             # pdb.set_trace()
             subsample_inds = torch.randint(0, high=fullshape[1], size=[n_subsample]);
-            z_target[i,:,:] = z_target_full[i,subsample_inds,:]
+            z_target[i,:,:] = z_target_full[i,subsample_inds,:] + (torch.randn(*z_target[i,:,:].shape) * .01).to(device) # add randn noise to get full support.
         
         optimizer.zero_grad()
     
@@ -143,7 +143,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         # - 0*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3) \ # time negative time-truncated curl energy
         reglosstime = time.time()-cpt
         
-        totalloss = loss + regloss
+        totalloss = loss  + regloss
         losses.append(totalloss.item())
         
         totalloss.backward()
@@ -184,6 +184,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         z_t.detach();
         z_t_b.detach();
         loss.detach();
+        totalloss.detach();
         del loss;
         torch.cuda.empty_cache()
     return model, losses, separate_losses
