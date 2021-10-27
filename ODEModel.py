@@ -42,7 +42,9 @@ class ODEfunc(nn.Module):
 #         pdb.set_trace()
         self.f = nn.Sequential(imap,
                        nn.Linear(imap.d_out, 512),
-                       nn.Softplus(),
+                       nn.Tanhshrink(),
+                       nn.Linear(512, 512),
+                       nn.Tanh(),
                        nn.Linear(512, 512),
                        nn.Softplus(),
                        nn.Linear(512, Z_DIM));
@@ -55,7 +57,8 @@ class ODEfunc(nn.Module):
 #             t = t.reshape(z.shape[0],1);
 #         tz = torch.cat((t,z),1);
 #         pdb.set_trace()
-        z_dot = self.f(z)
+#         z_dot = self.f(z)
+        z_dot = torch.clamp(self.f(z), max = 1, min=-1) 
         return z_dot
     
 #     def __init__(self, hidden_dims=(64,64)):

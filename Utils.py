@@ -34,7 +34,7 @@ class ImageDataset():
         self.probs = img.reshape(-1); 
         self.probs /= self.probs.sum();
 #         self.noise_std = np.array([MAX_VAL/w, MAX_VAL/h])
-        self.noise_std = np.array([.01,.01])*0;
+        self.noise_std = np.array([.01,.01])*0; # add the noise in training for an effective image blur.
 #         print(self.noise_std)
 
     def sample(self, batch_size=512):

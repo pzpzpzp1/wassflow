@@ -44,6 +44,9 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
     
     if my_loss == 'sinkhorn_large_reg':
         my_loss_f = SamplesLoss("sinkhorn", p=2, blur=0.01)
+#         my_loss_f = SamplesLoss("sinkhorn", p=2, blur=0.005)
+#         my_loss_f = SamplesLoss("hausdorff", p=2, blur=.05)
+#         my_loss_f = SamplesLoss("energy") # Energy Distance
     elif my_loss == 'sinkhorn_small_reg':
         my_loss_f = SamplesLoss("sinkhorn", p=2, blur=1)
     else:
@@ -52,7 +55,8 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
 
 #     model = FfjordModel(); 
     model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-5, weight_decay=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-5)
+    
     T = z_target_full.shape[0];
 
 #     # get spacetime bounding box and spacetime sample grid
@@ -76,6 +80,9 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         
         if (batch % 30 == 1):
             start = time.time()
+        if batch == 300:
+            for g in optimizer.param_groups:
+                g['lr'] = 1e-5
 
         # subsample z_target_full to z_target for loss computation
         fullshape = z_target_full.shape; # [T, n_samples, d]
@@ -132,18 +139,20 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         separate_losses[5,batch] = vgradloss.mean().item()
         separate_losses[6,batch] = KEloss.mean().item()
         
-        timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
+#         timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
+        timeIndices = (z_sample[:,0] < ((T-1.)/.001)).detach()
         
         # combine energies
         regloss = 0*div2loss.mean() \
                 + 0*.005*curl2loss.mean() \
                 + 0*rigid2loss.mean() \
-                + 0*.01*vgradloss.mean() \
+                + 0*vgradloss.mean() \
                 + 0*KEloss.mean() 
-        # - 0*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3) \ # time negative time-truncated curl energy
+#         - 1*torch.clamp(vgradloss.mean(), max = 10**10)  # make high noise velocity field
+#         - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
         reglosstime = time.time()-cpt
         
-        totalloss = loss  + regloss
+        totalloss = loss + regloss
         losses.append(totalloss.item())
         
         totalloss.backward()
