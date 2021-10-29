@@ -34,15 +34,15 @@ class ODEfunc(nn.Module):
         super(ODEfunc, self).__init__()
         # Define network layers.
 #         n_freq = 100; sigmac = 20; # frequencies to sample spacetime in.
-        n_freq = 0; sigmac = 20; # frequencies to sample spacetime in.
+        n_freq = 70; sigmac = 4.5; # frequencies to sample spacetime in.
         
         Z_DIM = 2; # dimension of vector field.
-        imap = InputMapping(Z_DIM, n_freq, sigma=sigmac);
+        imap = InputMapping(Z_DIM+1, n_freq, sigma=sigmac);
         self.imap = imap; # save for sigma params
 #         pdb.set_trace()
         self.f = nn.Sequential(imap,
                        nn.Linear(imap.d_out, 512),
-                       nn.Tanhshrink(),
+                       nn.Tanh(),
                        nn.Linear(512, 512),
                        nn.Tanh(),
                        nn.Linear(512, 512),
@@ -51,14 +51,14 @@ class ODEfunc(nn.Module):
 
     def get_z_dot(self, t, z):
         """z_dot is parameterized by a NN: z_dot = NN(t, z(t))"""
-#         if t.dim()==0:
-#             t = t.expand(z.shape[0],1);
-#         else:
-#             t = t.reshape(z.shape[0],1);
-#         tz = torch.cat((t,z),1);
+        if t.dim()==0:
+            t = t.expand(z.shape[0],1);
+        else:
+            t = t.reshape(z.shape[0],1);
+        tz = torch.cat((t,z),1);
 #         pdb.set_trace()
-#         z_dot = self.f(z)
-        z_dot = torch.clamp(self.f(z), max = 1, min=-1) 
+        z_dot = self.f(tz)
+#         z_dot = torch.clamp(self.f(z), max = 1, min=-1) 
         return z_dot
     
 #     def __init__(self, hidden_dims=(64,64)):

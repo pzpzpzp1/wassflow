@@ -45,7 +45,8 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
     if my_loss == 'sinkhorn_large_reg':
         my_loss_f = SamplesLoss("sinkhorn", p=2, blur=0.01)
 #         my_loss_f = SamplesLoss("sinkhorn", p=2, blur=0.005)
-#         my_loss_f = SamplesLoss("hausdorff", p=2, blur=.05)
+#         my_loss_f = SamplesLoss("hausdorff",p=2,blur=.05)
+#         my_loss_f = SamplesLoss("energy") # Energy Distance
 #         my_loss_f = SamplesLoss("energy") # Energy Distance
     elif my_loss == 'sinkhorn_small_reg':
         my_loss_f = SamplesLoss("sinkhorn", p=2, blur=1)
@@ -55,7 +56,8 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
 
 #     model = FfjordModel(); 
     model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4, weight_decay=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',factor=.5,patience=4,min_lr=1e-6)
     
     T = z_target_full.shape[0];
 
@@ -75,14 +77,14 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
     start = time.time()
     print('training with %s'%my_loss)
     start0 = time.time()
-    for batch in range(n_iters):        
+    for batch in range(n_iters):
         # get spacetime bounding box and spacetime sample grid
         
         if (batch % 30 == 1):
             start = time.time()
-        if batch == 300:
-            for g in optimizer.param_groups:
-                g['lr'] = 1e-5
+#         if batch == 300:
+#             for g in optimizer.param_groups:
+#                 g['lr'] = 1e-5
 
         # subsample z_target_full to z_target for loss computation
         fullshape = z_target_full.shape; # [T, n_samples, d]
@@ -90,7 +92,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         for i in range(fullshape[0]):
             # pdb.set_trace()
             subsample_inds = torch.randint(0, high=fullshape[1], size=[n_subsample]);
-            z_target[i,:,:] = z_target_full[i,subsample_inds,:] + (torch.randn(*z_target[i,:,:].shape) * .01).to(device) # add randn noise to get full support.
+            z_target[i,:,:] = z_target_full[i,subsample_inds,:] + (torch.randn(*z_target[i,:,:].shape) * .00).to(device) # add randn noise to get full support.
         
         optimizer.zero_grad()
     
@@ -157,8 +159,11 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         
         totalloss.backward()
         optimizer.step()
-        
         if (batch % 30 == 0):
+            for g in optimizer.param_groups:
+                print(g['lr'])
+            scheduler.step(totalloss.item()) # timestep schedule.
+            
             print('batch',batch,'loss',loss)
             plt.scatter(z_target.cpu().detach().numpy()[0,:,0], z_target.cpu().detach().numpy()[0,:,1], s=10, alpha=.5, linewidths=0, c='green', edgecolors='black')
             for t in range(1,T):
