@@ -20,6 +20,13 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 #import gc
 import os
 
+class Sine(nn.Module):
+    def __init(self):
+        super().__init__()
+
+    def forward(self, input):
+        return torch.sin( input)
+
 class ImageDataset():
     #"""Sample from a distribution defined by an image."""
     def __init__(self, img, MAX_VAL=.5, thresh=0):

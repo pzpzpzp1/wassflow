@@ -20,7 +20,7 @@ import gc
 import importlib
 import Utils
 # importlib.reload(Utils)
-from Utils import InputMapping, BoundingBox, ImageDataset, SaveTrajectory
+from Utils import InputMapping, BoundingBox, ImageDataset, SaveTrajectory, Sine
 from Utils import SaveTrajectory as st
 
 class ODEfunc(nn.Module):
