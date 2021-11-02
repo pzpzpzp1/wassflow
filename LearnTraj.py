@@ -163,7 +163,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         if (batch>1 and batch % 100 == 0):
             # every k iters, increase n_subsample by factor
             fac = 3.; kiter = 3;
-            n_subsample=round(n_subsample*(fac^(1./kiter)))
+            n_subsample=round(n_subsample*(fac**(1./kiter)))
             print(n_subsample)
             
         if (batch % 30 == 0):
