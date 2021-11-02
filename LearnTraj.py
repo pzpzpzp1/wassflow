@@ -57,7 +57,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
 #     model = FfjordModel(); 
     model.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',factor=.5,patience=3,min_lr=1e-6)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',factor=.5,patience=1,min_lr=1e-6)
     
     T = z_target_full.shape[0];
 
@@ -159,6 +159,13 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         
         totalloss.backward()
         optimizer.step()
+        
+        if (batch>1 and batch % 100 == 0):
+            # every k iters, increase n_subsample by factor
+            fac = 3.; kiter = 3;
+            n_subsample=round(n_subsample*(fac^(1./kiter)))
+            print(n_subsample)
+            
         if (batch % 30 == 0):
             for g in optimizer.param_groups:
                 print(g['lr'])
