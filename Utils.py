@@ -156,7 +156,7 @@ class SaveTrajectory():
     # colors = ['red','orange','magenta','cyan']
     colors = ['green','green','green','green']
 
-    def save_trajectory(model,z_target, my_loss, savedir='imgs', nsteps=20, memory=0.01, n=1000, reverse=False):
+    def save_trajectory(model,z_target, my_loss, savedir='imgs', nsteps=20, memory=0.01, n=1000, reverse=False, dpiv=100):
         """
         Plot the dynamics of the learned ODE.
         Saves images to `savedir`.
@@ -214,7 +214,7 @@ class SaveTrajectory():
             plt.scatter(x_traj[i,:,0], x_traj[i,:,1], s=10, alpha=.5, linewidths=0, c='blue', edgecolors='black')
             
             plt.axis('equal')
-            plt.savefig(os.path.join(final_dir, f"viz-{i:05d}.jpg"))
+            plt.savefig(os.path.join(final_dir, f"viz-{i:05d}.jpg"),dpi=dpiv)
             plt.clf()
 
     #         plt.scatter(x_traj[i,:,0], x_traj[i,:,1], s=2.3, alpha=1, linewidths=0.1, c='blue')

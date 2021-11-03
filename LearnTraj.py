@@ -56,8 +56,9 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
 
 #     model = FfjordModel(); 
     model.to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-5)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',factor=.5,patience=1,min_lr=1e-6)
+    currlr = 1e-3;
+    optimizer = torch.optim.Adam(model.parameters(), lr=currlr, weight_decay=1e-5)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',factor=.5,patience=5,min_lr=1e-7)
     
     T = z_target_full.shape[0];
 
@@ -74,6 +75,8 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
     
     separate_losses = np.empty((8, n_iters))
     losses = []
+    lrs=[]
+    n_subs=[]
     start = time.time()
     print('training with %s'%my_loss)
     start0 = time.time()
@@ -91,7 +94,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         z_target = torch.zeros([fullshape[0], n_subsample, fullshape[2]]).to(z_target_full)
         for i in range(fullshape[0]):
             # pdb.set_trace()
-            subsample_inds = torch.randint(0, high=fullshape[1], size=[n_subsample]);
+            subsample_inds = torch.randperm(fullshape[1])[:n_subsample];
             z_target[i,:,:] = z_target_full[i,subsample_inds,:] + (torch.randn(*z_target[i,:,:].shape) * .00).to(device) # add randn noise to get full support.
         
         optimizer.zero_grad()
@@ -156,22 +159,25 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         
         totalloss = loss + regloss
         losses.append(totalloss.item())
+        n_subs.append(n_subsample)
+        lrs.append(currlr)
         
         totalloss.backward()
         optimizer.step()
         
         if (batch>1 and batch % 150 == 0):
             # increase n_subsample by factor
-            fac = 1.2; 
+            fac = 1.5; 
             n_subsample=round(n_subsample*fac)
             if n_subsample > z_target_full.shape[1]:
                 n_subsample = z_target_full.shape[1]
             print('n_subsample',n_subsample)
             
         if (batch % 30 == 0):
-            for g in optimizer.param_groups:
-                print(g['lr'])
             scheduler.step(totalloss.item()) # timestep schedule.
+            for g in optimizer.param_groups:
+                currlr = g['lr'];
+                print('lr',currlr)
             
             print('batch',batch,'loss',loss)
             plt.scatter(z_target.cpu().detach().numpy()[0,:,0], z_target.cpu().detach().numpy()[0,:,1], s=10, alpha=.5, linewidths=0, c='green', edgecolors='black')
@@ -210,5 +216,5 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         totalloss.detach();
         del loss;
         torch.cuda.empty_cache()
-    return model, losses, separate_losses
+    return model, losses, separate_losses, lrs, n_subs
 
