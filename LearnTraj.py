@@ -166,7 +166,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         optimizer.step()
         
         if (batch>1 and batch % 150 == 0):
-            # increase n_subsample by factor
+            # increase n_subsample by factor. note this does decrease wasserstein loss because sampling is a biased estimator.
             fac = 1.5; 
             n_subsample=round(n_subsample*fac)
             if n_subsample > z_target_full.shape[1]:

@@ -50,7 +50,7 @@ class ImageDataset():
         samples = np.random.randn(*m.shape) * self.noise_std + m
         return torch.from_numpy(samples).type(torch.FloatTensor)
     
-    def import_img(file):
+    def import_img(file, rgb_weights=[0.2989, 0.5870, 0.1140]):
 #         """
 #         file : str
 #             filename for an rgba image
@@ -59,9 +59,10 @@ class ImageDataset():
 #             greyscale image
 #         """
         img = plt.imread(file)
-        rgb_weights = [0.2989, 0.5870, 0.1140]
-        gimg = np.dot(img[...,:3], rgb_weights)
-        return gimg
+        
+#         pdb.set_trace()
+        gimg = np.dot(img[...,:], rgb_weights)
+        return gimg, img
 
     def make_image(n=10000):
 #         """Make an X shape."""

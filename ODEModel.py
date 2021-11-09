@@ -34,7 +34,8 @@ class ODEfunc(nn.Module):
         super(ODEfunc, self).__init__()
         # Define network layers.
 #         n_freq = 100; sigmac = 20; # frequencies to sample spacetime in.
-        n_freq = 70; sigmac = 4; # frequencies to sample spacetime in.
+#         n_freq = 70; sigmac = 4; # frequencies to sample spacetime in. works for 2 frames
+        n_freq = 70; sigmac = 3; # frequencies to sample spacetime in.
         
         Z_DIM = 2; # dimension of vector field.
         imap = InputMapping(Z_DIM+1, n_freq, sigma=sigmac);
