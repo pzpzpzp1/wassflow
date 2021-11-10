@@ -34,33 +34,35 @@ class ODEfunc(nn.Module):
         super(ODEfunc, self).__init__()
         # Define network layers.
 #         n_freq = 100; sigmac = 20; # frequencies to sample spacetime in.
-#         n_freq = 70; sigmac = 4; # frequencies to sample spacetime in. works for 2 frames
-        n_freq = 70; sigmac = 3; # frequencies to sample spacetime in.
+        n_freq = 0; sigmac = 1; # frequencies to sample spacetime in. works for 2 frames
+#         n_freq = 70; sigmac = 3; # frequencies to sample spacetime in.
         
         Z_DIM = 2; # dimension of vector field.
         imap = InputMapping(Z_DIM+1, n_freq, sigma=sigmac);
         self.imap = imap; # save for sigma params
 #         pdb.set_trace()
+        N = 128
         self.f = nn.Sequential(imap,
-                       nn.Linear(imap.d_out, 512),
+                       nn.Linear(imap.d_out, N),
                        nn.Tanh(),
-                       nn.Linear(512, 512),
+                       nn.Linear(N, N),
                        nn.Tanh(),
-                       nn.Linear(512, 512),
+                       nn.Linear(N, N),
                        nn.Softplus(),
-                       nn.Linear(512, Z_DIM));
+                       nn.Linear(N, Z_DIM));
+#         self.f = nn.Sequential(nn.Linear(Z_DIM+1, Z_DIM));
 
-    def get_z_dot(self, t, z):
-        """z_dot is parameterized by a NN: z_dot = NN(t, z(t))"""
-        if t.dim()==0:
-            t = t.expand(z.shape[0],1);
-        else:
-            t = t.reshape(z.shape[0],1);
-        tz = torch.cat((t,z),1);
-#         pdb.set_trace()
-        z_dot = self.f(tz)
-#         z_dot = torch.clamp(self.f(z), max = 1, min=-1) 
-        return z_dot
+#     def get_z_dot(self, t, z):
+#         """z_dot is parameterized by a NN: z_dot = NN(t, z(t))"""
+#         if t.dim()==0:
+#             t = t.expand(z.shape[0],1);
+#         else:
+#             t = t.reshape(z.shape[0],1);
+#         tz = torch.cat((t,z),1);
+# #         pdb.set_trace()
+#         z_dot = self.f(tz)
+# #         z_dot = torch.clamp(self.f(z), max = 1, min=-1) 
+#         return z_dot
     
 #     def __init__(self, hidden_dims=(64,64)):
 #         super(ODEfunc, self).__init__()
@@ -90,23 +92,23 @@ class ODEfunc(nn.Module):
 #         return z_dot
 
     # d z_dot d z. assuming zdot was computed from z. otherwise output is just 0.
-    def getJacobians(self, t, z):
-        batchsize = z.shape[0]
+#     def getJacobians(self, t, z):
+#         batchsize = z.shape[0]
 
-        with torch.set_grad_enabled(True):            
-            z.requires_grad_(True)
-            t.requires_grad_(True)
-            z_dot = self.get_z_dot(t, z)
+#         with torch.set_grad_enabled(True):            
+#             z.requires_grad_(True)
+#             t.requires_grad_(True)
+#             z_dot = self.get_z_dot(t, z)
             
-            # compute jacobian of velocity field. [N,2,2]
-            # inputs z_dot.sum() because each z_dot only depends on one z. no cross derivatives. this batches the grad.
-            dim = z.shape[1];
-            jacobians = torch.zeros([batchsize,dim,dim], dtype=z.dtype, device=z.device);
-            for i in range(z.shape[1]):
-                 jacobians[:,i,:] = torch.autograd.grad( z_dot[:, i].sum(), z, create_graph=True)[0]
-        return z_dot, jacobians
+#             # compute jacobian of velocity field. [N,2,2]
+#             # inputs z_dot.sum() because each z_dot only depends on one z. no cross derivatives. this batches the grad.
+#             dim = z.shape[1];
+#             jacobians = torch.zeros([batchsize,dim,dim], dtype=z.dtype, device=z.device);
+#             for i in range(z.shape[1]):
+#                  jacobians[:,i,:] = torch.autograd.grad( z_dot[:, i].sum(), z, create_graph=True)[0]
+#         return z_dot, jacobians
     
-    def forward(self, t, state):
+    def forward(self, state):
         """
         Calculate the time derivative of z and divergence.
 
@@ -124,16 +126,14 @@ class ODEfunc(nn.Module):
         negative_divergence : torch.Tensor
             Time derivative of the log determinant of the Jacobian.
         """
-        z = state
-        batchsize = z.shape[0]
+#         pdb.set_trace()
+        
+        zt = state
+        batchsize = zt.shape[0]
 
         with torch.set_grad_enabled(True):
-            z.requires_grad_(True)
-            t.requires_grad_(True)
-
-            # Calculate the time derivative of z. 
-            # This is f(z(t), t; \theta) in Eq. 4.
-            z_dot = self.get_z_dot(t, z)
+            zt.requires_grad_(True)
+            z_dot = self.f(zt)
             
         return z_dot
 
@@ -178,17 +178,31 @@ class FfjordModel(torch.nn.Module):
         #print('integration_times',integration_times)
         # Integrate. This is the call to torchdiffeq.
         
-        state = odeint(
-            self.time_deriv_func, # Calculates time derivatives.
-            z, # Values to update.
-            integration_times, # When to evaluate.
-            method='dopri5', # Runge-Kutta
-            atol=1e-5, # Error tolerance
-            rtol=2e-5, # Error tolerance
-        )
+#         state = odeint(
+#             self.time_deriv_func, # Calculates time derivatives.
+#             z, # Values to update.
+#             integration_times, # When to evaluate.
+#             method='dopri5', # Runge-Kutta
+#             atol=1e-5, # Error tolerance
+#             rtol=2e-5, # Error tolerance
+#         )
         
-        z = state
-        return z
+#         pdb.set_trace()
+        zz = torch.tile(torch.transpose(z,0,1),(1,integration_times.shape[0]))
+        tt = integration_times.repeat_interleave(z.shape[0]).reshape((1,-1))
+        zt = torch.vstack((zz,tt))
+        
+        with torch.set_grad_enabled(True):
+            zt.requires_grad_(True)
+            nnout = self.time_deriv_func(torch.transpose(zt,0,1))
+        
+#         pdb.set_trace()
+        outvals = torch.transpose(torch.transpose(nnout,0,1).reshape((-1,integration_times.shape[0],zz.shape[0])),0, 1)
+        
+#         pdb.set_trace()
+        
+#         z = state
+        return outvals
     
 def _flip(x, dim):
     indices = [slice(None)] * x.dim()

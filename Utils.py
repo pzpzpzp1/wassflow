@@ -212,6 +212,7 @@ class SaveTrajectory():
             
             plt.quiver(z_sample_d[:,1], z_sample_d[:,2], z_dots_d[:,0], z_dots_d[:,1])
 
+#             pdb.set_trace()
             plt.scatter(x_traj[i,:,0], x_traj[i,:,1], s=10, alpha=.5, linewidths=0, c='blue', edgecolors='black')
             
             plt.axis('equal')
