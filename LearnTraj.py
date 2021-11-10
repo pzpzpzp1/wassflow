@@ -46,10 +46,10 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
 
 #     model = FfjordModel(); 
     model.to(device)
-    currlr = 1e-2;
+    currlr = 1e-3;
 #     currlr = 1e-4;
     optimizer = torch.optim.Adam(model.parameters(), lr=currlr, weight_decay=1e-5)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',factor=.5,patience=5,min_lr=1e-7)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',factor=.5,patience=5,min_lr=1e-5)
     
     T = z_target_full.shape[0];
 
@@ -73,38 +73,73 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
     start0 = time.time()
     
     fullshape = z_target_full.shape; # [T, n_samples, d]
+    if n_subsample > fullshape[1]:
+        n_subsample = fullshape[1]
     subsample_inds = torch.randperm(fullshape[1])[:n_subsample];
     for batch in range(n_iters):
         # get spacetime bounding box and spacetime sample grid
         
         if (batch % 30 == 1):
             start = time.time()
-#         if batch == 300:
-#             for g in optimizer.param_groups:
-#                 g['lr'] = 1e-5
 
         # subsample z_target_full to z_target for loss computation
-#         fullshape = z_target_full.shape; # [T, n_samples, d]
         z_target = torch.zeros([fullshape[0], n_subsample, fullshape[2]]).to(z_target_full)
         for i in range(fullshape[0]):
-#             subsample_inds = torch.randperm(fullshape[1])[:n_subsample];
+            subsample_inds = torch.randperm(fullshape[1])[:n_subsample];
             z_target[i,:,:] = z_target_full[i,subsample_inds,:];
 #             pdb.set_trace()
 #     + (torch.randn(*z_target[i,:,:].shape) * .00).to(device) # add randn noise to get full support.
         
         optimizer.zero_grad()
     
+        
+        ##########
+#         subsample_inds_t=subsample_inds.clone()
+#         z_target_t=z_target.clone()
+#         z_t_t=z_t.clone()
+#         fitloss_t=fitloss.clone()
+#         i=0
+#         subsample_inds = torch.randperm(fullshape[1])[:n_subsample];
+#         z_target[i,:,:] = z_target_full[i,subsample_inds,:];
+#         z_t = model(z_target[0,:,:], integration_times = torch.linspace(0,T-1,T).to(device))
+#         fitloss = .5*torch.norm(z_target[0,:,:] - z_t[0,:,:],p='fro')**2/n_subsample;
+        
+#         z_t_y = model(z_target[0,:,:], integration_times = torch.linspace(0,0,1).to(device))
+        
+#         torch.cat((z_target_t[0,:,:],z_t_t[0,:,:]),dim=1)
+#         torch.cat((z_target[0,:,:],z_t[0,:,:]),dim=1)
+#         torch.cat((z_target[0,:,:],z_t_y[0,:,:]),dim=1)
+        
+#         pdb.set_trace()
+#         ztar = torch.reshape(torch.arange(0,10),(5,2)).to(device);
+#         itimes = torch.linspace(0,1,2).to(device);
+#         zout1 = model(ztar, integration_times = itimes);
+#         subsample_inds = torch.randperm(5)[:5];
+#         ztar2 = ztar[subsample_inds,:];
+#         zout2 = model(ztar2, integration_times = itimes);
+#         torch.cat((ztar,zout1[0,:,:]),dim=1)
+#         torch.cat((ztar2,zout2[0,:,:]),dim=1)
+#         pdb.set_trace()
+        ##########
+    
+    
+        # this fro norm in la matches the sinkhorn loss from geomloss. need perturbation to be small enough that the optimal transport is 1-1 direct correspondence.
+#         la = .5*torch.norm(z_target[0,:,:] - (z_target[0,:,:]+.0032),p='fro')**2/n_subsample;
+#         lb = my_loss_f(z_target[0,:,:], (z_target[0,:,:]+.0032));
+    
         ## FORWARD and BACKWARD fitting loss
         # integrate ODE forward in time
         cpt = time.time();
 #         pdb.set_trace()
         z_t = model(z_target[0,:,:], integration_times = torch.linspace(0,T-1,T).to(device))
-        fitloss = torch.tensor(0.).to(device)
-        for t in range(0,T):
-            fitloss += my_loss_f(z_target[t,:,:], z_t[t,:,:])**2;
+        fitloss = .5*torch.norm(z_target[0,:,:] - z_t[0,:,:],p='fro')**2/n_subsample;
+        
+        for t in range(1,T):
+            fitloss += my_loss_f(z_target[t,:,:], z_t[t,:,:]);
 #             pdb.set_trace()
 #             fitloss += torch.norm(z_target[t,:,:] - z_t[t,:,:])**2;
-            
+#         pdb.set_trace()
+        
         if batch > 50:
             batch;
 #             pdb.set_trace()
@@ -124,8 +159,8 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
 #             print(fitloss0, fitlossB0)
         fitloss/=fitloss0
         fitlossB/=fitlossB0
-        loss = 1*torch.sqrt(fitloss); 
-#         loss = 1*fitloss; 
+#         loss = 1*torch.sqrt(fitloss); 
+        loss = 1*fitloss; 
         separate_losses[0,batch] = fitloss
         separate_losses[1,batch] = fitlossB
         fitlosstime = time.time()-cpt
@@ -175,12 +210,14 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         if (batch>1 and batch % 150 == 0):
             # increase n_subsample by factor. note this does decrease wasserstein loss because sampling is a biased estimator.
             fac = 1.5; 
+            n_subsample_p = n_subsample
             n_subsample=round(n_subsample*fac)
             if n_subsample > z_target_full.shape[1]:
                 n_subsample = z_target_full.shape[1]
-            print('n_subsample',n_subsample)
+            if n_subsample != n_subsample_p:
+                print('n_subsample', n_subsample)
             
-        if (batch % 10 == 0):
+        if (batch % 100 == 0):
             scheduler.step(totalloss.item()) # timestep schedule.
             for g in optimizer.param_groups:
                 currlr = g['lr'];
@@ -206,7 +243,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
             
             if save:
                 model.save_state(fn='models/state_' + f"{batch:04}" + '_time_' + str(ptime) + '_' + str(losses[batch]) + '.tar')
-#                 st.save_trajectory(model,z_target,my_loss + "_" + f"{batch:04}", savedir='imgs', nsteps=20, memory=0.01, n=1000)
+                st.save_trajectory(model,z_target,my_loss + "_" + f"{batch:04}", savedir='imgs', nsteps=20, memory=0.01, n=1000)
 #                 st.save_trajectory(model,z_target,my_loss + "_" + f"{batch:04}", savedir='imgs', nsteps=20, memory=0.01, n=1000, reverse = True)
 #             ## check garbage collected tensor list for increase in tensor sizes or number of objects.
 #             cc = 0;

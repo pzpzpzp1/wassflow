@@ -203,14 +203,14 @@ class SaveTrajectory():
             if reverse:
                 t = integration_times[(T-1)-i];
 
-            z_dots = model.time_deriv_func.get_z_dot(z_sample[:,0]*0.0 + t, z_sample[:,1:]);
+#             z_dots = model.time_deriv_func.get_z_dot(z_sample[:,0]*0.0 + t, z_sample[:,1:]);
             z_sample_d = z_sample.cpu().detach().numpy();
-            z_dots_d = z_dots.cpu().detach().numpy();
+#             z_dots_d = z_dots.cpu().detach().numpy();
             
             for t in range(T):
                 plt.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c='green', edgecolors='black')
             
-            plt.quiver(z_sample_d[:,1], z_sample_d[:,2], z_dots_d[:,0], z_dots_d[:,1])
+#             plt.quiver(z_sample_d[:,1], z_sample_d[:,2], z_dots_d[:,0], z_dots_d[:,1])
 
 #             pdb.set_trace()
             plt.scatter(x_traj[i,:,0], x_traj[i,:,1], s=10, alpha=.5, linewidths=0, c='blue', edgecolors='black')

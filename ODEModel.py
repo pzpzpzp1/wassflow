@@ -34,14 +34,14 @@ class ODEfunc(nn.Module):
         super(ODEfunc, self).__init__()
         # Define network layers.
 #         n_freq = 100; sigmac = 20; # frequencies to sample spacetime in.
-        n_freq = 0; sigmac = 1; # frequencies to sample spacetime in. works for 2 frames
+        n_freq = 70; sigmac = 2; # frequencies to sample spacetime in. works for 2 frames
 #         n_freq = 70; sigmac = 3; # frequencies to sample spacetime in.
         
         Z_DIM = 2; # dimension of vector field.
         imap = InputMapping(Z_DIM+1, n_freq, sigma=sigmac);
         self.imap = imap; # save for sigma params
 #         pdb.set_trace()
-        N = 128
+        N = 512
         self.f = nn.Sequential(imap,
                        nn.Linear(imap.d_out, N),
                        nn.Tanh(),
@@ -197,7 +197,8 @@ class FfjordModel(torch.nn.Module):
             nnout = self.time_deriv_func(torch.transpose(zt,0,1))
         
 #         pdb.set_trace()
-        outvals = torch.transpose(torch.transpose(nnout,0,1).reshape((-1,integration_times.shape[0],zz.shape[0])),0, 1)
+#         outvals = torch.transpose(torch.transpose(nnout,0,1).reshape((zz.shape[0],-1,integration_times.shape[0])),0, 2)
+        outvals = torch.transpose(torch.transpose(torch.transpose(nnout,0,1).reshape((zz.shape[0],integration_times.shape[0],-1)),0,1),1,2)
         
 #         pdb.set_trace()
         
