@@ -27,6 +27,16 @@ class Sine(nn.Module):
     def forward(self, input):
         return torch.sin( input)
 
+class SpecialLosses():
+    def __init(self):
+        super().__init__()
+    def grad_to_jac(grad):
+        dim = grad.shape[1]
+        return grad[:,0:dim,0:dim]
+    def jacdet(jac):
+#         pdb.set_trace()
+        return torch.det(jac);
+    
 class ImageDataset():
     #"""Sample from a distribution defined by an image."""
     def __init__(self, img, MAX_VAL=.5, thresh=0):
@@ -157,6 +167,12 @@ class SaveTrajectory():
     # colors = ['red','orange','magenta','cyan']
     colors = ['green','green','green','green']
 
+    def gpu_usage(devnum=0):
+#         print(torch.cuda.get_device_name(devnum))
+        allocated = round(torch.cuda.memory_allocated(devnum)/1024**3,2);
+        reserved = round(torch.cuda.memory_reserved(devnum)/1024**3,2);
+        print('Allocated:', allocated, 'GB', ' Reserved:', reserved, 'GB')
+    
     def save_trajectory(model,z_target, my_loss, savedir='imgs', nsteps=20, memory=0.01, n=1000, reverse=False, dpiv=100):
         """
         Plot the dynamics of the learned ODE.
@@ -189,14 +205,17 @@ class SaveTrajectory():
         if not os.path.exists(final_dir):
             os.makedirs(final_dir)
 
+#         SaveTrajectory.gpu_usage(devnum=0) # check gpu memory usage
         T = z_target.shape[0]
         integration_times = torch.linspace(0,T-1,nsteps).to(device);
         if reverse:
-            x_traj = model(z_target[T-1,:,:], integration_times, reverse=reverse).cpu().detach(); 
+            x_traj = model(z_target[T-1,:,:], integration_times).cpu().detach(); 
         else:
-            x_traj = model(z_target[0,:,:], integration_times, reverse=reverse).cpu().detach()
-
-        x_traj = x_traj.detach().numpy()
+            x_traj = model(z_target[0,:,:], integration_times).cpu().detach()
+#         SaveTrajectory.gpu_usage(devnum=0) # check gpu memory usage
+        
+        x_traj = x_traj.detach().cpu().numpy()
+#         SaveTrajectory.gpu_usage(devnum=0) # check gpu memory usage
 
         for i in range(nsteps):
             t = integration_times[i];
@@ -218,16 +237,18 @@ class SaveTrajectory():
             plt.axis('equal')
             plt.savefig(os.path.join(final_dir, f"viz-{i:05d}.jpg"),dpi=dpiv)
             plt.clf()
-
+        
+#         SaveTrajectory.trajectory_to_video(my_loss, savedir=savedir, mp4_fn='transform.mp4')
+            
     #         plt.scatter(x_traj[i,:,0], x_traj[i,:,1], s=2.3, alpha=1, linewidths=0.1, c='blue')
     #         plt.scatter(dat.detach().numpy()[:,0],dat.detach().numpy()[:,1],s=2.3, alpha=0.1, linewidths=5,c='green')
     #         plt.scatter(dat2.detach().numpy()[:,0],dat2.detach().numpy()[:,1],s=2.3, alpha=0.1, linewidths=5,c='green')
     #         plt.scatter(dat3.detach().numpy()[:,0],dat3.detach().numpy()[:,1],s=2.3, alpha=0.1, linewidths=5,c='green')
     #         plt.savefig(os.path.join(final_dir, f"viz-{i:05d}.jpg"))
     #         plt.clf()
-
-        SaveTrajectory.trajectory_to_video(my_loss, savedir, mp4_fn='transform.mp4');
-
+        torch.cuda.empty_cache()
+        
+        
 
     def trajectory_to_video(my_loss,savedir='imgs', mp4_fn='transform.mp4'):
         """Save the images written by `save_trajectory` as an mp4."""
@@ -238,4 +259,5 @@ class SaveTrajectory():
         bashCommand = 'ffmpeg -loglevel quiet -y -i {} {}'.format(img_fns, video_fn)
         process = subprocess.Popen(bashCommand.split(), stdout=subprocess.PIPE);
         output, error = process.communicate();
+        torch.cuda.empty_cache()
 
