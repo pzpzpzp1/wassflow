@@ -20,7 +20,7 @@ import gc
 import importlib
 import Utils
 # importlib.reload(Utils)
-from Utils import InputMapping, BoundingBox, ImageDataset, SaveTrajectory, Sine
+from Utils import InputMapping, BoundingBox, ImageDataset, SaveTrajectory, Sine, MiscTransforms
 from Utils import SaveTrajectory as st
 
 class ODEfunc(nn.Module):
@@ -168,21 +168,6 @@ class FfjordModel(torch.nn.Module):
         """Load model state."""
         self.load_state_dict(torch.load(fn))
     
-    def z_t_to_zt(self, z, t):
-        """
-        z: N d
-        t: T
-        zz: (TN) d
-        tt: (TN) 1
-        zt: (TN) (d+1)
-        """
-        zz = torch.tile(z,(t.shape[0],1))
-        tt = t.repeat_interleave(z.shape[0]).reshape((-1,1))
-        zt = torch.cat((zz,tt),dim=1)
-        
-#         pdb.set_trace()
-        return zt
-    
     def getGrads(self, zt):
         """
         zt: N (d+1)
@@ -229,7 +214,7 @@ class FfjordModel(torch.nn.Module):
 #         zz = torch.tile(torch.transpose(z,0,1),(1,integration_times.shape[0]))
 #         tt = integration_times.repeat_interleave(z.shape[0]).reshape((1,-1))
 #         zt = torch.vstack((zz,tt))
-        zt = self.z_t_to_zt(z, integration_times)
+        zt = MiscTransforms.z_t_to_zt(z, integration_times)
 #         pdb.set_trace()
         d = z.shape[1]
         T = integration_times.shape[0]
@@ -246,3 +231,120 @@ def _flip(x, dim):
     indices = [slice(None)] * x.dim()
     indices[dim] = torch.arange(x.size(dim) - 1, -1, -1, dtype=torch.long,             device=x.device)
     return x[tuple(indices)]
+
+class Siren(nn.Module):
+    def __init__(self, in_features=3, hidden_features=256, hidden_layers=2, out_features=2, outermost_linear=False, 
+                 first_omega_0=30, hidden_omega_0=30.):
+        super().__init__()
+        
+        self.net = []
+        self.net.append(SineLayer(in_features, hidden_features, 
+                                  is_first=True, omega_0=first_omega_0))
+
+        for i in range(hidden_layers):
+            self.net.append(SineLayer(hidden_features, hidden_features, 
+                                      is_first=False, omega_0=hidden_omega_0))
+
+        if outermost_linear:
+            final_linear = nn.Linear(hidden_features, out_features)
+            
+            with torch.no_grad():
+                final_linear.weight.uniform_(-np.sqrt(6 / hidden_features) / hidden_omega_0, 
+                                              np.sqrt(6 / hidden_features) / hidden_omega_0)
+                
+            self.net.append(final_linear)
+        else:
+            self.net.append(SineLayer(hidden_features, out_features, 
+                                      is_first=False, omega_0=hidden_omega_0))
+        
+        self.net = nn.Sequential(*self.net)
+    
+    def getGrads(self, zt):
+        """
+        zt: N (d+1)
+        out: N d
+        jacs: 
+        """
+        (out, throwaway) = self.forward(zt)
+        d = zt.shape[1]-1;
+        batchsize = zt.shape[0];
+        
+        jacobians = torch.zeros([batchsize, d, d+1], dtype=zt.dtype, device=zt.device);
+        for i in range(d):
+            jacobians[:,i,:] = torch.autograd.grad( out[:, i].sum(), zt, create_graph=True)[0]
+        return out, jacobians
+    
+    def forward(self, coords):
+#         coords = coords.clone().detach().requires_grad_(True) # allows to take derivative w.r.t. input
+        coords = coords.requires_grad_(True) # allows to take derivative w.r.t. input
+        output = self.net(coords)
+        return output, coords
+
+    def forward_with_activations(self, coords, retain_grad=True):
+        '''Returns not only model output, but also intermediate activations.
+        Only used for visualizing activations later!'''
+#         activations = OrderedDict()
+
+#         activation_count = 0
+#         x = coords.requires_grad_(True)
+#         activations['input'] = x
+#         for i, layer in enumerate(self.net):
+#             if isinstance(layer, SineLayer):
+#                 x, intermed = layer.forward_with_intermediate(x)
+                
+#                 if retain_grad:
+#                     x.retain_grad()
+#                     intermed.retain_grad()
+                    
+#                 activations['_'.join((str(layer.__class__), "%d" % activation_count))] = intermed
+#                 activation_count += 1
+#             else: 
+#                 x = layer(x)
+                
+#                 if retain_grad:
+#                     x.retain_grad()
+                    
+#             activations['_'.join((str(layer.__class__), "%d" % activation_count))] = x
+#             activation_count += 1
+
+#         return activations
+
+class SineLayer(nn.Module):
+    # See paper sec. 3.2, final paragraph, and supplement Sec. 1.5 for discussion of omega_0.
+    
+    # If is_first=True, omega_0 is a frequency factor which simply multiplies the activations before the 
+    # nonlinearity. Different signals may require different omega_0 in the first layer - this is a 
+    # hyperparameter.
+    
+    # If is_first=False, then the weights will be divided by omega_0 so as to keep the magnitude of 
+    # activations constant, but boost gradients to the weight matrix (see supplement Sec. 1.5)
+    
+    def __init__(self, in_features, out_features, bias=True,
+                 is_first=False, omega_0=30):
+        super().__init__()
+        self.omega_0 = omega_0
+        self.is_first = is_first
+        
+        self.in_features = in_features
+        self.linear = nn.Linear(in_features, out_features, bias=bias)
+        
+        self.init_weights()
+    
+    def init_weights(self):
+        with torch.no_grad():
+            if self.is_first:
+                self.linear.weight.uniform_(-1 / self.in_features, 
+                                             1 / self.in_features)      
+            else:
+                self.linear.weight.uniform_(-np.sqrt(6 / self.in_features) / self.omega_0, 
+                                             np.sqrt(6 / self.in_features) / self.omega_0)
+        
+    def forward(self, input):
+        return torch.sin(self.omega_0 * self.linear(input))
+    
+    def forward_with_intermediate(self, input): 
+        # For visualization of activation distributions
+        intermediate = self.omega_0 * self.linear(input)
+        return torch.sin(intermediate), intermediate
+    
+    

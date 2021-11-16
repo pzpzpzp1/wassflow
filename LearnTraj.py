@@ -19,14 +19,14 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 import gc
 import importlib
 import Utils
-from Utils import InputMapping, BoundingBox, ImageDataset, SaveTrajectory
+from Utils import InputMapping, BoundingBox, ImageDataset, SaveTrajectory, MiscTransforms
 from Utils import SaveTrajectory as st
 from Utils import SpecialLosses as sl
 import ODEModel
-from ODEModel import ODEfunc
+from ODEModel import ODEfunc, Siren
 from ODEModel import FfjordModel
 
-def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, model=FfjordModel(), save=False):
+def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, model=Siren(), save=False):
     """
         Learns a trajectory between multiple timesteps contained in z_target
         ----------
@@ -50,13 +50,16 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
     max_n_subsample = 2000; # more is too slow. 2000 is enough to get a reasonable capture of the image per iter.
     if n_subsample > max_n_subsample:
         n_subsample = max_n_subsample
-    currlr = 2e-3;
-#     currlr = 1e-4;
-    optimizer = torch.optim.Adam(model.parameters(), lr=currlr, weight_decay=1e-5)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',factor=.5,patience=5,min_lr=1e-5)
+#     currlr = 2e-3;
+    currlr = 1e-4;
+    stepsperbatch=150
+#     optimizer = torch.optim.Adam(model.parameters(), lr=currlr, weight_decay=1e-5)
+    optimizer = torch.optim.Adam(model.parameters(), lr=currlr)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',factor=.5,patience=3,min_lr=1e-8)
     
     T = z_target_full.shape[0];
 
+#     pdb.set_trace()
 #     # get spacetime bounding box and spacetime sample grid
     BB = BoundingBox(z_target_full);
     
@@ -83,7 +86,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
     for batch in range(n_iters):
         # get spacetime bounding box and spacetime sample grid
 #         print(batch)
-        if (batch % 30 == 1):
+        if (batch % stepsperbatch == 1):
             start = time.time()
 
         # subsample z_target_full to z_target for loss computation
@@ -102,8 +105,10 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         ## FORWARD and BACKWARD fitting loss
         # integrate ODE forward in time
         cpt = time.time();
+        zt = MiscTransforms.z_t_to_zt(z=z_target[0,:,:], t = torch.linspace(0,T-1,T).to(device))
+        (z_t_2, coords) = model(zt)
+        z_t = z_t_2.reshape((fullshape[0],-1,fullshape[2]))
 #         pdb.set_trace()
-        z_t = model(z_target[0,:,:], integration_times = torch.linspace(0,T-1,T).to(device))
         fitloss = .5*torch.norm(z_target[0,:,:] - z_t[0,:,:],p='fro')**2/n_subsample;
         
 #         pdb.set_trace()
@@ -124,14 +129,23 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         
         # VELOCITY REGULARIZERS loss
         cpt = time.time();
-        z_sample = BB.samplerandom(N = 2000, bbscale = 1.1); 
-        z_dots, zt_grad = model.getGrads(z_sample); dim = zt_grad.shape[1]
-        jac = sl.grad_to_jac(zt_grad);
-        dets = sl.jacdet(jac);
-        beta = 100; # at 0 input, output is .006. We do want it to be stricly positive. not just 0 det.
-        noninversionloss = 30*nn.Softplus(beta)(-dets);
-        separate_losses[1,batch] = noninversionloss.mean().item()
         
+        zt0 = MiscTransforms.z_t_to_zt(z_target_full[i, torch.randperm(fullshape[1])[:200],:], \
+                                       t = torch.rand(20, 1).to(device)*(T-1.))
+        throwout, zt_grad0 = model.getGrads(zt0); dim = zt_grad0.shape[1]
+        jac = zt_grad0[:,0:dim,0:dim];
+        Mnoninversionloss = sl.jacdetloss(jac);
+        separate_losses[3,batch] = Mnoninversionloss.mean().item()
+        KE = (torch.norm(zt_grad0[:,:,dim],p=2,dim=1)**2);
+        separate_losses[4,batch] = KE.mean().item()
+        
+#         z_sample = BB.samplerandom(N = 2000, bbscale = 1.1); 
+        z_sample = BoundingBox.samplecustom(N = 2000); 
+#         pdb.set_trace()
+        z_dots, zt_grad = model.getGrads(z_sample); dim = zt_grad.shape[1]
+        jac = zt_grad[:,0:dim,0:dim];
+        noninversionloss = sl.jacdetloss(jac);
+        separate_losses[1,batch] = noninversionloss.mean().item()
         veloc_norms_2 = (torch.norm(zt_grad[:,:,dim],p=2,dim=1)**2);
         separate_losses[2,batch] = veloc_norms_2.mean().item()
         
@@ -156,8 +170,11 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
 #         timeIndices = (z_sample[:,0] < ((T-1.)/.001)).detach()
         
         # combine energies
-        regloss = noninversionloss.mean()\
-                + veloc_norms_2.mean()*.3
+#         regloss = veloc_norms_2.mean()*1
+        regloss = noninversionloss.mean()*0 \
+                + veloc_norms_2.mean()*0 \
+                + Mnoninversionloss.mean()*.1 \
+                + KE.mean()*5
 #         regloss = 0*div2loss.mean() \
 #                 + 0*.005*curl2loss.mean() \
 #                 + 0*rigid2loss.mean() \
@@ -188,7 +205,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
             if n_subsample != n_subsample_p:
                 print('n_subsample', n_subsample)
             
-        if (batch % 300 == 0):
+        if (batch % stepsperbatch == 0):
             scheduler.step(totalloss.item()) # timestep schedule.
             for g in optimizer.param_groups:
                 currlr = g['lr'];
@@ -211,10 +228,10 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
 #             print('fit time ',fitlosstime,' reg loss time',reglosstime)
             print('time elapsed',ptime,'total time',time.time()-start0)
             print('batch number',batch,'out of',n_iters)
-            
-            if save:
-                model.save_state(fn='models/state_' + f"{batch:04}" + '_time_' + str(ptime) + '_' + str(losses[batch]) + '.tar')
-                st.save_trajectory(model,z_target,my_loss + "_" + f"{batch:04}", savedir='imgs', nsteps=40, memory=0.01, n=1000)
+            savetimebegin = time.time()
+            if save and batch > 0:
+#                 model.save_state(fn='models/state_' + f"{batch:04}" + '_time_' + str(ptime) + '_' + str(losses[batch]) + '.tar')
+                st.save_trajectory(model,z_target,my_loss + "_" + f"{batch:04}", savedir='imgs', nsteps=20, memory=0.01, n=1000)
                 st.trajectory_to_video(my_loss + "_" + f"{batch:04}", savedir='imgs', mp4_fn='transform.mp4')
 #                 st.save_trajectory(model,z_target,my_loss + "_" + f"{batch:04}", savedir='imgs', nsteps=20, memory=0.01, n=1000, reverse = True)
 #             ## check garbage collected tensor list for increase in tensor sizes or number of objects.
@@ -227,6 +244,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
 #                 except:
 #                     pass
 #             print('nobjs ', cc);
+            print('savetime',time.time()-savetimebegin)
 
         fitloss.detach();
         z_t.detach();

@@ -20,6 +20,8 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 #import gc
 import os
 
+# from ODEModel import FfjordModel
+
 class Sine(nn.Module):
     def __init(self):
         super().__init__()
@@ -33,9 +35,10 @@ class SpecialLosses():
     def grad_to_jac(grad):
         dim = grad.shape[1]
         return grad[:,0:dim,0:dim]
-    def jacdet(jac):
+    def jacdetloss(jac,beta=100):  # at 0 input, output is .006. We do want it to be stricly positive. not just 0 det.
 #         pdb.set_trace()
-        return torch.det(jac);
+        dets = torch.det(jac);
+        return 30*nn.Softplus(beta)(-dets);
     
 class ImageDataset():
     #"""Sample from a distribution defined by an image."""
@@ -89,10 +92,21 @@ class ImageDataset():
         return img
 
     def normalize_samples(z_target):
-        ## normalize a [K,N,D] tensor. K is number of frames. N is number of samples. D is dimension. Fit into [0,1] box without changing aspect ratio.
-        dim = z_target.shape[2]
-        z_target -= z_target.reshape(-1,dim).min(0)[0]
-        z_target /= z_target.reshape(-1,dim).max()
+        ### normalize a [K,N,D] tensor. K is number of frames. N is number of samples. D is dimension. Fit into [0,1] box without changing aspect ratio.
+        ## normalize a [K,N,D] tensor. K is number of frames. N is number of samples. D is dimension. Fit into [-1,1] box without changing aspect ratio. centered on tight bounding box center.
+#         pdb.set_trace()
+        BB0 = BoundingBox(z_target);
+        z_target -= BB0.C;
+        BB1 = BoundingBox(z_target);
+        z_target /= max(BB1.mac) 
+        z_target /= 1.1; # adds buffer to the keyframes from -1,1 border.
+#         BB2 = BoundingBox(z_target);
+        
+#         dim = z_target.shape[2]
+#         z_target -= z_target.reshape(-1,dim).min(0)[0]
+#         z_target /= z_target.reshape(-1,dim).max()
+#         z_target -= .5
+#         z_target *= 1.5
         return z_target
 
 class BoundingBox():
@@ -142,6 +156,15 @@ class BoundingBox():
         deltx = torch.cat((dT,eTR-eLL))
         z_sample = deltx*z_sample + torch.cat((TC,self.C));
 
+        return z_sample
+    
+    def samplecustom(N = 10000):
+        # sample [-1.1,1.1] x [-1.1,1.1] x [0,1]
+#         pdb.set_trace()
+        z_sample = torch.rand(N, 3).to(device);
+        z_sample[:,0:2]-=.5
+        z_sample[:,0:2]*=2.2
+        
         return z_sample
     
 # fourier features mapping
@@ -208,10 +231,13 @@ class SaveTrajectory():
 #         SaveTrajectory.gpu_usage(devnum=0) # check gpu memory usage
         T = z_target.shape[0]
         integration_times = torch.linspace(0,T-1,nsteps).to(device);
-        if reverse:
-            x_traj = model(z_target[T-1,:,:], integration_times).cpu().detach(); 
-        else:
-            x_traj = model(z_target[0,:,:], integration_times).cpu().detach()
+        
+        zt = MiscTransforms.z_t_to_zt(z=z_target[0,:,:], t = integration_times)
+        (z_t_2, coords) = model(zt)
+        x_traj = z_t_2.reshape((integration_times.shape[0],-1,z_target.shape[2]))
+#         x_traj = model(z_target[0,:,:], integration_times).cpu().detach()
+#         pdb.set_trace()
+        
 #         SaveTrajectory.gpu_usage(devnum=0) # check gpu memory usage
         
         x_traj = x_traj.detach().cpu().numpy()
@@ -260,4 +286,19 @@ class SaveTrajectory():
         process = subprocess.Popen(bashCommand.split(), stdout=subprocess.PIPE);
         output, error = process.communicate();
         torch.cuda.empty_cache()
-
+        
+class MiscTransforms():
+    def z_t_to_zt(z, t):
+        """
+        z: N d
+        t: T
+        zz: (TN) d
+        tt: (TN) 1
+        zt: (TN) (d+1)
+        """
+        zz = torch.tile(z,(t.shape[0],1))
+        tt = t.repeat_interleave(z.shape[0]).reshape((-1,1))
+        zt = torch.cat((zz,tt),dim=1)
+        
+#         pdb.set_trace()
+        return zt
