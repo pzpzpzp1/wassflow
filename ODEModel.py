@@ -223,7 +223,7 @@ class FfjordModel(torch.nn.Module):
             zt.requires_grad_(True)
         nnout = self.f(zt)
         outvals = nnout.reshape((T,-1,d))
-#         pdb.set_trace()
+        
 
         return outvals
     
@@ -258,7 +258,7 @@ class Siren(nn.Module):
                                       is_first=False, omega_0=hidden_omega_0))
         
         self.net = nn.Sequential(*self.net)
-    def showmap(self, t=0, bound=1.1,N=40, ti=.5):
+    def showmap(self, t=0, bound=1.1,N=40, ti=.5,ax=plt):
         dx = 2*bound/(N-1)
         xvals = torch.linspace(-bound,bound,N)
         X, Y = torch.meshgrid(xvals, xvals)
@@ -274,8 +274,11 @@ class Siren(nn.Module):
         Yo = XYo[:,1].reshape((N,N)).detach().cpu().numpy()
         Xt = X*(1-ti)+Xo*ti
         Yt = Y*(1-ti)+Yo*ti
-        plt.pcolormesh(Xt, Yt, z, edgecolors = 'none', alpha=.5, cmap='inferno')
-    
+        
+        ax.pcolormesh(Xt, Yt, z, edgecolors = 'none', alpha=.5, cmap='inferno')
+        plt.xlim((-bound,bound))
+        plt.ylim((-bound,bound))
+        ax.axis('equal')
     def getGrads(self, zt):
         """
         zt: N (d+1)
@@ -294,7 +297,11 @@ class Siren(nn.Module):
     def forward(self, coords):
 #         coords = coords.clone().detach().requires_grad_(True) # allows to take derivative w.r.t. input
         coords = coords.requires_grad_(True) # allows to take derivative w.r.t. input
-        output = self.net(coords)
+        disp = self.net(coords)
+        
+#         pdb.set_trace()
+        output = coords[:,0:2] + disp; # learn displacement. makes first frame easier to learn?
+        
         return output, coords
 
     def forward_with_activations(self, coords, retain_grad=True):

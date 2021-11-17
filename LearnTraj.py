@@ -130,7 +130,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         # VELOCITY REGULARIZERS loss
         cpt = time.time();
         
-        zt0 = MiscTransforms.z_t_to_zt(z_target_full[i, torch.randperm(fullshape[1])[:200],:], \
+        zt0 = MiscTransforms.z_t_to_zt(z_target_full[i, torch.randperm(fullshape[1])[:300],:], \
                                        t = torch.rand(20, 1).to(device)*(T-1.))
         throwout, zt_grad0 = model.getGrads(zt0); dim = zt_grad0.shape[1]
         jac = zt_grad0[:,0:dim,0:dim];
@@ -171,10 +171,10 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         
         # combine energies
 #         regloss = veloc_norms_2.mean()*1
-        regloss = noninversionloss.mean()*.5 \
+        regloss = noninversionloss.mean()*.1 \
                 + veloc_norms_2.mean()*0 \
                 + Mnoninversionloss.mean()*.1 \
-                + KE.mean()*5
+                + KE.mean()*3.5
 #         regloss = 0*div2loss.mean() \
 #                 + 0*.005*curl2loss.mean() \
 #                 + 0*rigid2loss.mean() \
@@ -185,7 +185,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         reglosstime = time.time()-cpt
 #         pdb.set_trace()
         
-        totalloss = loss + regloss
+        totalloss = loss + 1*regloss
         losses.append(totalloss.item())
         n_subs.append(n_subsample)
         lrs.append(currlr)
@@ -213,18 +213,18 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
             
             print('batch',batch,'loss',loss)
 #             plt.scatter(z_target.cpu().detach().numpy()[0,:,0], z_target.cpu().detach().numpy()[0,:,1], s=10, alpha=.5, linewidths=0, c='green', edgecolors='black')
+            f, (ax1, ax2, ax3) = plt.subplots(1, 3)
             cols1 = ['blue','cyan']
             cols2 = ['green','red']
             for t in range(0,T):
 #                 plt.scatter(z_t_b.cpu().detach().numpy()[t,:,0], z_t_b.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c='red', edgecolors='black')
-                plt.scatter(z_t.cpu().detach().numpy()[t,:,0], z_t.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c=cols1[t], edgecolors='black')
-                plt.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c=cols2[t], edgecolors='black')
-            plt.axis('equal')
-            plt.show()
-            model.showmap(t=0)
-            plt.show()
-            model.showmap(t=1)
-            plt.show()
+                ax1.scatter(z_t.cpu().detach().numpy()[t,:,0], z_t.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c=cols1[t], edgecolors='black')
+                ax1.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c=cols2[t], edgecolors='black')
+            ax1.axis('equal')
+            
+#             plt.show()
+            model.showmap(t=0,ax=ax2); # ax2.axis('equal')
+            model.showmap(t=1,ax=ax3)
             
 #             pdb.set_trace()
             
