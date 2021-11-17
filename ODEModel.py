@@ -258,6 +258,23 @@ class Siren(nn.Module):
                                       is_first=False, omega_0=hidden_omega_0))
         
         self.net = nn.Sequential(*self.net)
+    def showmap(self, t=0, bound=1.1,N=40, ti=.5):
+        dx = 2*bound/(N-1)
+        xvals = torch.linspace(-bound,bound,N)
+        X, Y = torch.meshgrid(xvals, xvals)
+        Xc = X[:-1,:-1] + dx/2
+        Yc = Y[:-1,:-1] + dx/2
+        z = torch.sqrt((Xc-Xc.round())**2 + (Yc-Yc.round())**2)
+
+        tt = torch.tensor(t);
+        XYi = torch.cat((X.reshape((-1,1)), Y.reshape((-1,1)), tt.repeat(N**2,1)),dim=1);
+        (XYo,blah) = self.forward(XYi.to(device))
+        
+        Xo = XYo[:,0].reshape((N,N)).detach().cpu().numpy()
+        Yo = XYo[:,1].reshape((N,N)).detach().cpu().numpy()
+        Xt = X*(1-ti)+Xo*ti
+        Yt = Y*(1-ti)+Yo*ti
+        plt.pcolormesh(Xt, Yt, z, edgecolors = 'none', alpha=.5, cmap='inferno')
     
     def getGrads(self, zt):
         """

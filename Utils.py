@@ -218,15 +218,24 @@ class SaveTrajectory():
             Number of samples to visualize.
         """
 
-        BB = BoundingBox(z_target);
-        z_sample = BB.sampleuniform(t_N = 1, x_N = 20, y_N = 20);
-
         if reverse: 
             my_loss+='_neg';
 
         final_dir = savedir+'/'+my_loss
         if not os.path.exists(final_dir):
             os.makedirs(final_dir)
+            
+        # show map as grid deformation
+        model.showmap(t=0)
+        plt.savefig(os.path.join(final_dir, f"map0.jpg"),dpi=dpiv)
+        plt.clf()
+        model.showmap(t=1)
+        plt.savefig(os.path.join(final_dir, f"map1.jpg"),dpi=dpiv)
+        plt.clf()
+        
+        
+        BB = BoundingBox(z_target);
+        z_sample = BB.sampleuniform(t_N = 1, x_N = 20, y_N = 20);
 
 #         SaveTrajectory.gpu_usage(devnum=0) # check gpu memory usage
         T = z_target.shape[0]

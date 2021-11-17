@@ -171,7 +171,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         
         # combine energies
 #         regloss = veloc_norms_2.mean()*1
-        regloss = noninversionloss.mean()*0 \
+        regloss = noninversionloss.mean()*.5 \
                 + veloc_norms_2.mean()*0 \
                 + Mnoninversionloss.mean()*.1 \
                 + KE.mean()*5
@@ -220,6 +220,10 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
                 plt.scatter(z_t.cpu().detach().numpy()[t,:,0], z_t.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c=cols1[t], edgecolors='black')
                 plt.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c=cols2[t], edgecolors='black')
             plt.axis('equal')
+            plt.show()
+            model.showmap(t=0)
+            plt.show()
+            model.showmap(t=1)
             plt.show()
             
 #             pdb.set_trace()
