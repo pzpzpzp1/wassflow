@@ -234,44 +234,45 @@ def _flip(x, dim):
 
 class Siren(nn.Module):
     def __init__(self, in_features=3, hidden_features=256, hidden_layers=2, out_features=2, outermost_linear=False, 
-                 first_omega_0=30, hidden_omega_0=30.):
+                 first_omega_0=30, hidden_omega_0=30.,usesiren = False):
         super().__init__()
         
         ## siren net
-#         self.net = []
-#         self.net.append(SineLayer(in_features, hidden_features, 
-#                                   is_first=True, omega_0=first_omega_0))
-#         for i in range(hidden_layers):
-#             self.net.append(SineLayer(hidden_features, hidden_features, 
-#                                       is_first=False, omega_0=hidden_omega_0))
-#         if outermost_linear:
-#             final_linear = nn.Linear(hidden_features, out_features)
-            
-#             with torch.no_grad():
-#                 final_linear.weight.uniform_(-np.sqrt(6 / hidden_features) / hidden_omega_0, 
-#                                               np.sqrt(6 / hidden_features) / hidden_omega_0)
-#             self.net.append(final_linear)
-#         else:
-#             self.net.append(SineLayer(hidden_features, out_features, 
-#                                       is_first=False, omega_0=hidden_omega_0))
-#         self.net = nn.Sequential(*self.net)
-        
-        ## RFF net
-        n_freq = 256; sigmac = 10; # frequencies to sample spacetime in.
-#         n_freq = 50; sigmac = 4; # frequencies to sample spacetime in.
-#         n_freq = 70; sigmac = 3; # frequencies to sample spacetime in.
-        Z_DIM = 2; # dimension of vector field.
-        imap = InputMapping(Z_DIM+1, n_freq, sigma=sigmac);
-        self.imap = imap; # save for sigma params
-        N = 512
-        self.net = nn.Sequential(imap,
-                       nn.Linear(imap.d_out, N),
-                       nn.Tanh(),
-                       nn.Linear(N, N),
-                       nn.Tanh(),
-                       nn.Linear(N, N),
-                       nn.Softplus(),
-                       nn.Linear(N, Z_DIM));
+        if usesiren:
+            self.net = []
+            self.net.append(SineLayer(in_features, hidden_features, 
+                                      is_first=True, omega_0=first_omega_0))
+            for i in range(hidden_layers):
+                self.net.append(SineLayer(hidden_features, hidden_features, 
+                                          is_first=False, omega_0=hidden_omega_0))
+            if outermost_linear:
+                final_linear = nn.Linear(hidden_features, out_features)
+
+                with torch.no_grad():
+                    final_linear.weight.uniform_(-np.sqrt(6 / hidden_features) / hidden_omega_0, 
+                                                  np.sqrt(6 / hidden_features) / hidden_omega_0)
+                self.net.append(final_linear)
+            else:
+                self.net.append(SineLayer(hidden_features, out_features, 
+                                          is_first=False, omega_0=hidden_omega_0))
+            self.net = nn.Sequential(*self.net)
+        else:
+            ## RFF net
+            n_freq = 256; sigmac = 10; # frequencies to sample spacetime in.
+    #         n_freq = 50; sigmac = 4; # frequencies to sample spacetime in.
+    #         n_freq = 70; sigmac = 3; # frequencies to sample spacetime in.
+            Z_DIM = 2; # dimension of vector field.
+            imap = InputMapping(Z_DIM+1, n_freq, sigma=sigmac);
+            self.imap = imap; # save for sigma params
+            N = 512
+            self.net = nn.Sequential(imap,
+                           nn.Linear(imap.d_out, N),
+                           nn.Tanh(),
+                           nn.Linear(N, N),
+                           nn.Tanh(),
+                           nn.Linear(N, N),
+                           nn.Softplus(),
+                           nn.Linear(N, Z_DIM));
         
         
         
