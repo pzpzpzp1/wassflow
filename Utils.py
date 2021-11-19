@@ -171,7 +171,9 @@ class BoundingBox():
 class InputMapping(nn.Module):
     def __init__(self, d_in, n_freq, sigma=2):
         super().__init__()
-        self.B = nn.Parameter(torch.randn(n_freq, d_in) * sigma/np.sqrt(d_in)/2.0, requires_grad=False).to(device) # gaussian
+        Bmat = torch.randn(n_freq, d_in) * sigma/np.sqrt(d_in)/2.0; # gaussian
+        Bmat[:,d_in-1] /= 4; # time frequencies are a quarter of spacial frequencies.
+        self.B = nn.Parameter(Bmat, requires_grad=False).to(device) 
 #         self.B = nn.Parameter((torch.rand(n_freq, d_in)-.5) * 2 * sigma/np.sqrt(d_in), requires_grad=False).to(device) # uniform
         self.d_in = d_in;
         self.n_freq = n_freq;
