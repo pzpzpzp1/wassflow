@@ -317,8 +317,8 @@ class Siren(nn.Module):
         coords = coords.requires_grad_(True) # allows to take derivative w.r.t. input
         disp = self.net(coords)
         
-#         pdb.set_trace()
-        output = coords[:,0:2] + disp; # learn displacement. makes first frame easier to learn?
+        dispT = torch.mul(coords[:,-1:], disp)
+        output = coords[:,0:2] + dispT; # learn displacement. guarantees t=0 frame is identity.
         
         return output, coords
 

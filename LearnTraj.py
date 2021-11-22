@@ -52,13 +52,13 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
     if n_subsample > max_n_subsample:
         n_subsample = max_n_subsample
 #     currlr = 2e-3;
-#     currlr = 1e-4;
-    currlr = 1e-5;
+    currlr = 1e-4;
+#     currlr = 1e-5;
     stepsperbatch=150
 #     optimizer = torch.optim.Adam(model.parameters(), lr=currlr, weight_decay=1e-5)
 #     optimizer = torch.optim.Adam(model.parameters(), lr=currlr)
     optimizer = torch.optim.Adam(list(model.parameters()) + list(bmodel.parameters()), lr=currlr)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',factor=.5,patience=3,min_lr=1e-8)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',factor=.5,patience=3,min_lr=1e-6)
     
     T = z_target_full.shape[0];
 
@@ -104,18 +104,18 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         zt = MiscTransforms.z_t_to_zt(z=z_target[0,:,:], t = torch.linspace(0,T-1,T).to(device))
         (z_t_2, coords) = model(zt)
         z_t = z_t_2.reshape((fullshape[0],-1,fullshape[2]))
-        (z_t_b_i, coords) = bmodel(MiscTransforms.z_t_to_zt(z=z_t[0,:,:], t=torch.tensor(0).to(device).reshape((1,1))))
+#         (z_t_b_i, coords) = bmodel(MiscTransforms.z_t_to_zt(z=z_t[0,:,:], t=torch.tensor(0).to(device).reshape((1,1))))
 #         fitlossb2 = .5*torch.norm(z_target[0,:,:] - z_t_b_i,p='fro')**2/n_subsample;
         fitloss = .5*torch.norm(z_target[0,:,:] - z_t[0,:,:],p='fro')**2/n_subsample;
         for t in range(1,T):
             # forward loss
             fitloss += my_loss_f(z_target[t,:,:], z_t[t,:,:]);
             # backward loss
-            (forwardback, coords) = bmodel(MiscTransforms.z_t_to_zt(z=z_t[t,:,:], t=torch.tensor(t).to(device).reshape((1,1))))
+#             (forwardback, coords) = bmodel(MiscTransforms.z_t_to_zt(z=z_t[t,:,:], t=torch.tensor(t).to(device).reshape((1,1))))
 #             fitlossb2 += .5*torch.norm(z_target[0,:,:] - forwardback,p='fro')**2/n_subsample;
         
         ## random time backwards fitloss
-        fbt = torch.rand(20, 1).to(device)*(T-1.);
+        fbt = torch.rand(10, 1).to(device)*(T-1.);
 #         fbt = torch.tensor([0,1]).to(device).reshape((-1,1));
         zt0 = MiscTransforms.z_t_to_zt(z_target[0,:,:], t = fbt)
 #         (zt_f, coords) = model(zt0); 
@@ -185,7 +185,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         regloss = noninversionloss.mean()*0 \
                 + veloc_norms_2.mean()*0 \
                 + Mnoninversionloss.mean()*0 \
-                + KE.mean()*5
+                + KE.mean()*.005
 #         regloss = 0*div2loss.mean() \
 #                 + 0*.005*curl2loss.mean() \
 #                 + 0*rigid2loss.mean() \
@@ -196,7 +196,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         reglosstime = time.time()-cpt
 #         pdb.set_trace()
         loss = fitloss + 1*fitlossb; 
-        totalloss = loss + .02*regloss
+        totalloss = loss + regloss
         losses.append(totalloss.item())
         n_subs.append(n_subsample)
         lrs.append(currlr)
@@ -206,7 +206,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         
         if (batch>1 and batch % 150 == 0):
             # increase n_subsample by factor. note this does decrease wasserstein loss because sampling is a biased estimator.
-            fac = 1.5; 
+            fac = 1.83; 
             n_subsample_p = n_subsample
             n_subsample=round(n_subsample*fac)
             if n_subsample > z_target_full.shape[1]:
@@ -246,7 +246,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
             savetimebegin = time.time()
             if save and batch > 0:
 #                 model.save_state(fn='models/state_' + f"{batch:04}" + '_time_' + str(ptime) + '_' + str(losses[batch]) + '.tar')
-                st.save_trajectory(model,z_target,my_loss + "_" + f"{batch:04}", savedir='imgs', nsteps=20, memory=0.01, n=1000)
+                st.save_trajectory(model,z_target[:,1:4000,:],my_loss + "_" + f"{batch:04}", savedir='imgs', nsteps=10, memory=0.01, n=1000)
                 st.trajectory_to_video(my_loss + "_" + f"{batch:04}", savedir='imgs', mp4_fn='transform.mp4')
 #                 st.save_trajectory(model,z_target,my_loss + "_" + f"{batch:04}", savedir='imgs', nsteps=20, memory=0.01, n=1000, reverse = True)
 #             ## check garbage collected tensor list for increase in tensor sizes or number of objects.
