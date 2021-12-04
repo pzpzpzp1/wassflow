@@ -94,7 +94,7 @@ class ImageDataset():
     def normalize_samples(z_target):
         ### normalize a [K,N,D] tensor. K is number of frames. N is number of samples. D is dimension. Fit into [0,1] box without changing aspect ratio.
         ## normalize a [K,N,D] tensor. K is number of frames. N is number of samples. D is dimension. Fit into [-1,1] box without changing aspect ratio. centered on tight bounding box center.
-#         pdb.set_trace()
+
         BB0 = BoundingBox(z_target);
         z_target -= BB0.C;
         BB1 = BoundingBox(z_target);
@@ -107,6 +107,7 @@ class ImageDataset():
 #         z_target /= z_target.reshape(-1,dim).max()
 #         z_target -= .5
 #         z_target *= 1.5
+#         pdb.set_trace()
         return z_target
 
 class BoundingBox():
@@ -172,7 +173,7 @@ class InputMapping(nn.Module):
     def __init__(self, d_in, n_freq, sigma=2):
         super().__init__()
         Bmat = torch.randn(n_freq, d_in) * sigma/np.sqrt(d_in)/2.0; # gaussian
-        Bmat[:,d_in-1] /= 4; # time frequencies are a quarter of spacial frequencies.
+        Bmat[:,d_in-1] /= 2; # time frequencies are a quarter of spacial frequencies.
         self.B = nn.Parameter(Bmat, requires_grad=False).to(device) 
 #         self.B = nn.Parameter((torch.rand(n_freq, d_in)-.5) * 2 * sigma/np.sqrt(d_in), requires_grad=False).to(device) # uniform
         self.d_in = d_in;

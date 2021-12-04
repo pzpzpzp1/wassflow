@@ -234,7 +234,7 @@ def _flip(x, dim):
 
 class Siren(nn.Module):
     def __init__(self, in_features=3, hidden_features=256, hidden_layers=2, out_features=2, outermost_linear=False, 
-                 first_omega_0=30, hidden_omega_0=30.,usesiren = False):
+                 first_omega_0=30, hidden_omega_0=30.,usesiren = False, sigmac = 10):
         super().__init__()
         
         ## siren net
@@ -258,7 +258,7 @@ class Siren(nn.Module):
             self.net = nn.Sequential(*self.net)
         else:
             ## RFF net
-            n_freq = 256; sigmac = 10; # frequencies to sample spacetime in.
+            n_freq = 256; # sigmac = 10; # frequencies to sample spacetime in.
     #         n_freq = 50; sigmac = 4; # frequencies to sample spacetime in.
     #         n_freq = 70; sigmac = 3; # frequencies to sample spacetime in.
             Z_DIM = 2; # dimension of vector field.

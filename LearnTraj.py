@@ -40,8 +40,8 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
             NN representing the vector field
         
         """
-#     pdb.set_trace()
     z_target_full = ImageDataset.normalize_samples(z_target_full) # normalize to fit in [0,1] box.
+#     pdb.set_trace()
     my_loss_f = SamplesLoss("sinkhorn", p=2, blur=0.00001)
 
 
@@ -52,13 +52,13 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
     if n_subsample > max_n_subsample:
         n_subsample = max_n_subsample
 #     currlr = 2e-3;
-    currlr = 1e-4;
-#     currlr = 1e-5;
+#     currlr = 1e-4;
+    currlr = 1e-6;
     stepsperbatch=150
 #     optimizer = torch.optim.Adam(model.parameters(), lr=currlr, weight_decay=1e-5)
 #     optimizer = torch.optim.Adam(model.parameters(), lr=currlr)
     optimizer = torch.optim.Adam(list(model.parameters()) + list(bmodel.parameters()), lr=currlr)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',factor=.5,patience=3,min_lr=1e-6)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',factor=.5,patience=1,min_lr=1e-7)
     
     T = z_target_full.shape[0];
 
@@ -185,7 +185,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         regloss = noninversionloss.mean()*0 \
                 + veloc_norms_2.mean()*0 \
                 + Mnoninversionloss.mean()*0 \
-                + KE.mean()*.005
+                + KE.mean()*.0000
 #         regloss = 0*div2loss.mean() \
 #                 + 0*.005*curl2loss.mean() \
 #                 + 0*rigid2loss.mean() \
@@ -195,7 +195,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
 #         - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
         reglosstime = time.time()-cpt
 #         pdb.set_trace()
-        loss = fitloss + 1*fitlossb; 
+        loss = fitloss + 0*fitlossb; 
         totalloss = loss + regloss
         losses.append(totalloss.item())
         n_subs.append(n_subsample)
