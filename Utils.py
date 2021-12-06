@@ -3,11 +3,9 @@ import numpy as np
 from IPython.display import clear_output
 import pdb
 import time
-
 import matplotlib.pyplot as plt
-
 import torch
-import torch
+import torchvision
 import torch.nn as nn
 from torch import Tensor
 from torch.nn  import functional as F 
@@ -19,6 +17,7 @@ use_cuda = torch.cuda.is_available()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 #import gc
 import os
+import cv2 as cv
 
 # from ODEModel import FfjordModel
 
@@ -42,23 +41,46 @@ class SpecialLosses():
     
 class ImageDataset():
     #"""Sample from a distribution defined by an image."""
-    def __init__(self, img, MAX_VAL=.5, thresh=0):
+    def __init__(self, imgname, thresh=204, cannylow = 50, cannyhigh = 200):
+        img = cv.imread(imgname);
+        edges = cv.Canny(img,cannylow,cannyhigh)
+        self.img = img.copy()
+        self.edges = edges.copy()
+        
         img[img<thresh]=0; # threshold to cut empty region of image
-        h, w = img.shape
-        xx = np.linspace(-MAX_VAL, MAX_VAL, w)
-        yy = np.linspace(-MAX_VAL, MAX_VAL, h)
+        img/=img.max()
+        h1, w1 = img.shape
+        
+        MAX_VAL=.5
+        xx = np.linspace(-MAX_VAL, MAX_VAL, w1)
+        yy = np.linspace(-MAX_VAL, MAX_VAL, h1)
         xx, yy = np.meshgrid(xx, yy)
         xx = xx.reshape(-1, 1)
         yy = yy.reshape(-1, 1)
         self.means = np.concatenate([xx, yy], 1)
+
         self.probs = img.reshape(-1); 
         self.probs /= self.probs.sum();
-#         self.noise_std = np.array([MAX_VAL/w, MAX_VAL/h])
-        self.noise_std = np.array([.01,.01])*0; # add the noise in training for an effective image blur.
-#         print(self.noise_std)
+        self.silprobs = edges.reshape(-1);
+        self.silprobs /= self.silprobs.sum();
+        
+        # self.noise_std = np.array([MAX_VAL/w1, MAX_VAL/h1]*silnoise)
+        
+    def imshow(self, input: torch.Tensor):
+        out = torchvision.utils.make_grid(input, nrow=2, padding=5)
+        out_np: np.ndarray = K.utils.tensor_to_image(out)
+        plt.imshow(out_np)
+        plt.axis('off')
+        plt.show()
 
     def sample(self, batch_size=512):
         inds = np.random.choice(int(self.probs.shape[0]), int(batch_size), p=self.probs)
+        m = self.means[inds]
+        samples = np.random.randn(*m.shape) * self.noise_std + m
+        return torch.from_numpy(samples).type(torch.FloatTensor)
+    
+    def samplesil(self, batch_size=512):
+        inds = np.random.choice(int(self.silprobs.shape[0]), int(batch_size), p=self.silprobs)
         m = self.means[inds]
         samples = np.random.randn(*m.shape) * self.noise_std + m
         return torch.from_numpy(samples).type(torch.FloatTensor)
@@ -173,7 +195,7 @@ class InputMapping(nn.Module):
     def __init__(self, d_in, n_freq, sigma=2):
         super().__init__()
         Bmat = torch.randn(n_freq, d_in) * sigma/np.sqrt(d_in)/2.0; # gaussian
-        Bmat[:,d_in-1] /= 2; # time frequencies are a quarter of spacial frequencies.
+        Bmat[:,d_in-1] /= 6; # time frequencies are a quarter of spacial frequencies.
         self.B = nn.Parameter(Bmat, requires_grad=False).to(device) 
 #         self.B = nn.Parameter((torch.rand(n_freq, d_in)-.5) * 2 * sigma/np.sqrt(d_in), requires_grad=False).to(device) # uniform
         self.d_in = d_in;
