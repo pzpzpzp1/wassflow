@@ -41,15 +41,20 @@ class SpecialLosses():
     
 class ImageDataset():
     #"""Sample from a distribution defined by an image."""
-    def __init__(self, imgname, thresh=204, cannylow = 50, cannyhigh = 200):
-        img = cv.imread(imgname);
-        edges = cv.Canny(img,cannylow,cannyhigh)
+    def __init__(self, imgname, thresh=51, cannylow = 50, cannyhigh = 200, rgb_weights=[0.2989, 0.5870, 0.1140,0], noise_std = .005):
+        imgrgb = cv.imread(imgname, cv.IMREAD_UNCHANGED);
+        img = cv.cvtColor(imgrgb, cv.COLOR_BGR2GRAY);
+        edges = cv.Canny(imgrgb,cannylow,cannyhigh)
         self.img = img.copy()
         self.edges = edges.copy()
         
-        img[img<thresh]=0; # threshold to cut empty region of image
-        img/=img.max()
-        h1, w1 = img.shape
+        imgd = img.astype('float')
+        edgesd = edges.astype('float')
+        
+        imgd[imgd<thresh]=0; 
+        imgd[imgd>=thresh]=1;
+        imgd=1-imgd
+        h1, w1 = imgd.shape
         
         MAX_VAL=.5
         xx = np.linspace(-MAX_VAL, MAX_VAL, w1)
@@ -59,46 +64,25 @@ class ImageDataset():
         yy = yy.reshape(-1, 1)
         self.means = np.concatenate([xx, yy], 1)
 
-        self.probs = img.reshape(-1); 
+        self.probs = imgd.reshape(-1); 
         self.probs /= self.probs.sum();
-        self.silprobs = edges.reshape(-1);
+        self.silprobs = edgesd.reshape(-1);
         self.silprobs /= self.silprobs.sum();
         
-        # self.noise_std = np.array([MAX_VAL/w1, MAX_VAL/h1]*silnoise)
+        self.noise_std = noise_std
         
-    def imshow(self, input: torch.Tensor):
-        out = torchvision.utils.make_grid(input, nrow=2, padding=5)
-        out_np: np.ndarray = K.utils.tensor_to_image(out)
-        plt.imshow(out_np)
-        plt.axis('off')
-        plt.show()
-
-    def sample(self, batch_size=512):
+    def sample(self, batch_size=512, scale = [1,-1], center = [0,0]):
         inds = np.random.choice(int(self.probs.shape[0]), int(batch_size), p=self.probs)
         m = self.means[inds]
-        samples = np.random.randn(*m.shape) * self.noise_std + m
-        return torch.from_numpy(samples).type(torch.FloatTensor)
-    
-    def samplesil(self, batch_size=512):
-        inds = np.random.choice(int(self.silprobs.shape[0]), int(batch_size), p=self.silprobs)
-        m = self.means[inds]
-        samples = np.random.randn(*m.shape) * self.noise_std + m
-        return torch.from_numpy(samples).type(torch.FloatTensor)
-    
-    def import_img(file, rgb_weights=[0.2989, 0.5870, 0.1140]):
-#         """
-#         file : str
-#             filename for an rgba image
-#         Returns
-#         gimg : 2D array
-#             greyscale image
-#         """
-        img = plt.imread(file)
+        samps = torch.from_numpy(m).type(torch.FloatTensor) * torch.tensor(scale) + torch.tensor(center)
         
-#         pdb.set_trace()
-        gimg = np.dot(img[...,:], rgb_weights)
-        return gimg, img
-
+        sinds = np.random.choice(int(self.silprobs.shape[0]), int(batch_size), p=self.silprobs)
+        ms = self.means[sinds]
+        silsamples = np.random.randn(*ms.shape) * self.noise_std + ms
+        silsamps =  torch.from_numpy(silsamples).type(torch.FloatTensor) * torch.tensor(scale) + torch.tensor(center)
+        
+        return samps, silsamps
+    
     def make_image(n=10000):
 #         """Make an X shape."""
         points = np.zeros((n,2))
