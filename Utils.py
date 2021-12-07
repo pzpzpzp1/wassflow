@@ -21,6 +21,9 @@ import cv2 as cv
 
 # from ODEModel import FfjordModel
 
+def ezshow(dat, col='green'):
+    plt.scatter(dat.detach().numpy()[:,0],dat.detach().numpy()[:,1],s=10, alpha=0.5, linewidths=0,c=col); plt.axis('equal'); 
+
 class Sine(nn.Module):
     def __init(self):
         super().__init__()

@@ -52,8 +52,8 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
     if n_subsample > max_n_subsample:
         n_subsample = max_n_subsample
 #     currlr = 2e-3;
-#     currlr = 1e-4;
-    currlr = 1e-6;
+    currlr = 1e-4;
+#     currlr = 1e-6;
     stepsperbatch=150
 #     optimizer = torch.optim.Adam(model.parameters(), lr=currlr, weight_decay=1e-5)
 #     optimizer = torch.optim.Adam(model.parameters(), lr=currlr)
@@ -185,7 +185,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         regloss = noninversionloss.mean()*0 \
                 + veloc_norms_2.mean()*0 \
                 + Mnoninversionloss.mean()*0 \
-                + KE.mean()*.0000
+                + KE.mean()*.0001
 #         regloss = 0*div2loss.mean() \
 #                 + 0*.005*curl2loss.mean() \
 #                 + 0*rigid2loss.mean() \
@@ -195,7 +195,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
 #         - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
         reglosstime = time.time()-cpt
 #         pdb.set_trace()
-        loss = fitloss + 0*fitlossb; 
+        loss = fitloss + 1*fitlossb; 
         totalloss = loss + regloss
         losses.append(totalloss.item())
         n_subs.append(n_subsample)
