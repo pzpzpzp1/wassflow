@@ -74,12 +74,12 @@ class ImageDataset():
         
         self.noise_std = noise_std
         
-    def sample(self, batch_size=512, scale = [1,-1], center = [0,0]):
-        inds = np.random.choice(int(self.probs.shape[0]), int(batch_size), p=self.probs)
+    def sample(self, n_inner=500, n_sil = 500, scale = [1,-1], center = [0,0]):
+        inds = np.random.choice(int(self.probs.shape[0]), int(n_inner), p=self.probs)
         m = self.means[inds]
         samps = torch.from_numpy(m).type(torch.FloatTensor) * torch.tensor(scale) + torch.tensor(center)
         
-        sinds = np.random.choice(int(self.silprobs.shape[0]), int(batch_size), p=self.silprobs)
+        sinds = np.random.choice(int(self.silprobs.shape[0]), int(n_sil), p=self.silprobs)
         ms = self.means[sinds]
         silsamples = np.random.randn(*ms.shape) * self.noise_std + ms
         silsamps =  torch.from_numpy(silsamples).type(torch.FloatTensor) * torch.tensor(scale) + torch.tensor(center)
@@ -100,24 +100,20 @@ class ImageDataset():
         img, _ = np.histogramdd(points, bins=40, range=[[-1.5,1.5],[-1.5,1.5]])
         return img
 
-    def normalize_samples(z_target):
-        ### normalize a [K,N,D] tensor. K is number of frames. N is number of samples. D is dimension. Fit into [0,1] box without changing aspect ratio.
+    def normalize_samples(z_target, aux=None):
         ## normalize a [K,N,D] tensor. K is number of frames. N is number of samples. D is dimension. Fit into [-1,1] box without changing aspect ratio. centered on tight bounding box center.
-
         BB0 = BoundingBox(z_target);
         z_target -= BB0.C;
         BB1 = BoundingBox(z_target);
         z_target /= max(BB1.mac) 
         z_target /= 1.1; # adds buffer to the keyframes from -1,1 border.
-#         BB2 = BoundingBox(z_target);
+
+        if aux is not None:
+            aux -= BB0.C;
+            aux /= max(BB1.mac)
+            aux /= 1.1
         
-#         dim = z_target.shape[2]
-#         z_target -= z_target.reshape(-1,dim).min(0)[0]
-#         z_target /= z_target.reshape(-1,dim).max()
-#         z_target -= .5
-#         z_target *= 1.5
-#         pdb.set_trace()
-        return z_target
+        return z_target, aux
 
 class BoundingBox():
     ## use like:

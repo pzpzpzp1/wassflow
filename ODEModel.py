@@ -232,51 +232,53 @@ def _flip(x, dim):
     indices[dim] = torch.arange(x.size(dim) - 1, -1, -1, dtype=torch.long,             device=x.device)
     return x[tuple(indices)]
 
-class Siren(nn.Module):
-    def __init__(self, in_features=3, hidden_features=256, hidden_layers=2, out_features=2, outermost_linear=False, 
-                 first_omega_0=30, hidden_omega_0=30.,usesiren = False, sigmac = 10):
+class coordMLP(nn.Module):
+    def __init__(self, in_features=3, hidden_features=512, hidden_layers=2, out_features=2, sigmac = 10, n_freq = 256):
         super().__init__()
         
         ## siren net
-        if usesiren:
-            self.net = []
-            self.net.append(SineLayer(in_features, hidden_features, 
-                                      is_first=True, omega_0=first_omega_0))
-            for i in range(hidden_layers):
-                self.net.append(SineLayer(hidden_features, hidden_features, 
-                                          is_first=False, omega_0=hidden_omega_0))
-            if outermost_linear:
-                final_linear = nn.Linear(hidden_features, out_features)
+#         if usesiren:
+#             self.net = []
+#             self.net.append(SineLayer(in_features, hidden_features, 
+#                                       is_first=True, omega_0=first_omega_0))
+#             for i in range(hidden_layers):
+#                 self.net.append(SineLayer(hidden_features, hidden_features, 
+#                                           is_first=False, omega_0=hidden_omega_0))
+#             if outermost_linear:
+#                 final_linear = nn.Linear(hidden_features, out_features)
 
-                with torch.no_grad():
-                    final_linear.weight.uniform_(-np.sqrt(6 / hidden_features) / hidden_omega_0, 
-                                                  np.sqrt(6 / hidden_features) / hidden_omega_0)
-                self.net.append(final_linear)
-            else:
-                self.net.append(SineLayer(hidden_features, out_features, 
-                                          is_first=False, omega_0=hidden_omega_0))
-            self.net = nn.Sequential(*self.net)
-        else:
+#                 with torch.no_grad():
+#                     final_linear.weight.uniform_(-np.sqrt(6 / hidden_features) / hidden_omega_0, 
+#                                                   np.sqrt(6 / hidden_features) / hidden_omega_0)
+#                 self.net.append(final_linear)
+#             else:
+#                 self.net.append(SineLayer(hidden_features, out_features, 
+#                                           is_first=False, omega_0=hidden_omega_0))
+#             self.net = nn.Sequential(*self.net)
+#         else:
             ## RFF net
-            n_freq = 256; # sigmac = 10; # frequencies to sample spacetime in.
+#             n_freq = 256; # sigmac = 10; # frequencies to sample spacetime in.
     #         n_freq = 50; sigmac = 4; # frequencies to sample spacetime in.
     #         n_freq = 70; sigmac = 3; # frequencies to sample spacetime in.
-            Z_DIM = 2; # dimension of vector field.
-            imap = InputMapping(Z_DIM+1, n_freq, sigma=sigmac);
-            self.imap = imap; # save for sigma params
-            N = 512
-            self.net = nn.Sequential(imap,
-                           nn.Linear(imap.d_out, N),
-                           nn.Tanh(),
-                           nn.Linear(N, N),
-                           nn.Tanh(),
-                           nn.Linear(N, N),
-                           nn.Softplus(),
-                           nn.Linear(N, Z_DIM));
+    
+        imap = InputMapping(in_features, n_freq, sigma=sigmac);
+        self.imap = imap; 
+        self.net = []
+        self.net.append(imap)
+        self.net.append(nn.Linear(imap.d_out, hidden_features))
+        for i in range(hidden_layers):
+            self.net.append(nn.Tanh())
+            self.net.append(nn.Linear(hidden_features, hidden_features))
+        self.net.append(nn.Softplus())
+        self.net.append(nn.Linear(hidden_features, out_features));
+        self.net = nn.Sequential(*self.net)
+            
+    def save_state(self, fn='state.tar'):
+        torch.save(self.state_dict(), fn)
+    def load_state(self, fn='state.tar'):
+        self.load_state_dict(torch.load(fn))
         
-        
-        
-    def showmap(self, t=0, bound=1.1,N=40, ti=.5,ax=plt):
+    def showmap(self, t=0, bound=1.1,N=40, ti=1,ax=plt):
         dx = 2*bound/(N-1)
         xvals = torch.linspace(-bound,bound,N)
         X, Y = torch.meshgrid(xvals, xvals)
@@ -321,35 +323,6 @@ class Siren(nn.Module):
         output = coords[:,0:2] + dispT; # learn displacement. guarantees t=0 frame is identity.
         
         return output, coords
-
-    def forward_with_activations(self, coords, retain_grad=True):
-        '''Returns not only model output, but also intermediate activations.
-        Only used for visualizing activations later!'''
-#         activations = OrderedDict()
-
-#         activation_count = 0
-#         x = coords.requires_grad_(True)
-#         activations['input'] = x
-#         for i, layer in enumerate(self.net):
-#             if isinstance(layer, SineLayer):
-#                 x, intermed = layer.forward_with_intermediate(x)
-                
-#                 if retain_grad:
-#                     x.retain_grad()
-#                     intermed.retain_grad()
-                    
-#                 activations['_'.join((str(layer.__class__), "%d" % activation_count))] = intermed
-#                 activation_count += 1
-#             else: 
-#                 x = layer(x)
-                
-#                 if retain_grad:
-#                     x.retain_grad()
-                    
-#             activations['_'.join((str(layer.__class__), "%d" % activation_count))] = x
-#             activation_count += 1
-
-#         return activations
 
 class SineLayer(nn.Module):
     # See paper sec. 3.2, final paragraph, and supplement Sec. 1.5 for discussion of omega_0.

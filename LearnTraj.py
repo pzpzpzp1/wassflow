@@ -1,14 +1,6 @@
-import math
-import numpy as np
+import math, numpy as np, pdb, time, matplotlib.pyplot as plt, torch, gc, importlib, Utils, ODEModel
 from IPython.display import clear_output
-import pdb
-import time
-
-import matplotlib.pyplot as plt
-
-import torch
-from torch import Tensor
-from torch import nn
+from torch import Tensor, nn
 from torch.nn  import functional as F 
 from torch.autograd import Variable
 from torchdiffeq import odeint_adjoint as odeint
@@ -16,34 +8,12 @@ from torch.distributions import MultivariateNormal
 use_cuda = torch.cuda.is_available()
 from geomloss import SamplesLoss
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-import gc
-import importlib
-import Utils
-from Utils import InputMapping, BoundingBox, ImageDataset, SaveTrajectory, MiscTransforms
-from Utils import SaveTrajectory as st
-from Utils import SpecialLosses as sl
-import ODEModel
-from ODEModel import ODEfunc, Siren
-from ODEModel import FfjordModel
+from Utils import InputMapping, BoundingBox, ImageDataset, SaveTrajectory, MiscTransforms, SaveTrajectory as st, SpecialLosses as sl
+from ODEModel import ODEfunc, coordMLP, FfjordModel
 
-def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, model=Siren(), bmodel=Siren(), save=False):
-    """
-        Learns a trajectory between multiple timesteps contained in z_target
-        ----------
-        z_target : torch.Tensor 
-            Tensor of shape (T,n,d) where T is the number of timesteps
-        my_loss : str
-            Data fidelity loss, either 'sinkhorn_large_reg', 'sinkhorn_small_reg' or 'energy_distance'
-        Returns
-        -------
-        model : 
-            NN representing the vector field
-        
-        """
-    z_target_full = ImageDataset.normalize_samples(z_target_full) # normalize to fit in [0,1] box.
-#     pdb.set_trace()
+def learn_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=coordMLP(), bmodel=coordMLP(), save=False):
+    z_target_full, __ = ImageDataset.normalize_samples(z_target_full) # normalize to fit in [0,1] box.
     my_loss_f = SamplesLoss("sinkhorn", p=2, blur=0.00001)
-
 
 #     model = FfjordModel(); 
     model.to(device)
@@ -55,31 +25,17 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
     currlr = 1e-4;
 #     currlr = 1e-6;
     stepsperbatch=150
-#     optimizer = torch.optim.Adam(model.parameters(), lr=currlr, weight_decay=1e-5)
-#     optimizer = torch.optim.Adam(model.parameters(), lr=currlr)
     optimizer = torch.optim.Adam(list(model.parameters()) + list(bmodel.parameters()), lr=currlr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',factor=.5,patience=1,min_lr=1e-7)
     
     T = z_target_full.shape[0];
-
-#     pdb.set_trace()
-#     # get spacetime bounding box and spacetime sample grid
     BB = BoundingBox(z_target_full);
-    
-#     t_N = 30; x_N = 10; bbscale = 1.1;
-#     t_sample = torch.linspace(1, T, t_N).to(device);
-#     LL = z_target_full.min(0)[0].min(0)[0]; TR = z_target_full.max(0)[0].max(0)[0]; C = (LL+TR)/2; # lower left, top right, center
-#     eLL = (LL-C)*1.1+C; eTR = (TR-C)*1.1+C; # extended bounding box.
-#     xspace = torch.linspace(eLL[0],eTR[0],x_N); yspace = torch.linspace(eLL[1],eTR[1],x_N);
-#     xgrid,ygrid=torch.meshgrid(xspace,yspace);
-#     z_sample = torch.transpose(torch.reshape(torch.stack([xgrid,ygrid]),(2,-1)),0,1).to(device);
     
     separate_losses = np.empty((8, n_iters))
     losses = []
     lrs=[]
     n_subs=[]
     start = time.time()
-    print('training with %s'%my_loss)
     start0 = time.time()
     
     fullshape = z_target_full.shape; # [T, n_samples, d]
@@ -87,7 +43,7 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         n_subsample = fullshape[1]
     subsample_inds = torch.randperm(fullshape[1])[:n_subsample];
     for batch in range(n_iters):
-#         print(batch)
+        print(batch, end=' ')
         if (batch % stepsperbatch == 1):
             start = time.time()
 
@@ -104,28 +60,18 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
         zt = MiscTransforms.z_t_to_zt(z=z_target[0,:,:], t = torch.linspace(0,T-1,T).to(device))
         (z_t_2, coords) = model(zt)
         z_t = z_t_2.reshape((fullshape[0],-1,fullshape[2]))
-#         (z_t_b_i, coords) = bmodel(MiscTransforms.z_t_to_zt(z=z_t[0,:,:], t=torch.tensor(0).to(device).reshape((1,1))))
-#         fitlossb2 = .5*torch.norm(z_target[0,:,:] - z_t_b_i,p='fro')**2/n_subsample;
         fitloss = .5*torch.norm(z_target[0,:,:] - z_t[0,:,:],p='fro')**2/n_subsample;
         for t in range(1,T):
-            # forward loss
             fitloss += my_loss_f(z_target[t,:,:], z_t[t,:,:]);
-            # backward loss
-#             (forwardback, coords) = bmodel(MiscTransforms.z_t_to_zt(z=z_t[t,:,:], t=torch.tensor(t).to(device).reshape((1,1))))
-#             fitlossb2 += .5*torch.norm(z_target[0,:,:] - forwardback,p='fro')**2/n_subsample;
         
         ## random time backwards fitloss
-        fbt = torch.rand(10, 1).to(device)*(T-1.);
-#         fbt = torch.tensor([0,1]).to(device).reshape((-1,1));
+        fbt = torch.rand(15, 1).to(device)*(T-1.);
         zt0 = MiscTransforms.z_t_to_zt(z_target[0,:,:], t = fbt)
-#         (zt_f, coords) = model(zt0); 
         zt_f, zt_grad0 = model.getGrads(zt0); 
         (zt_fb, coords) = bmodel(torch.cat((zt_f, zt0[:,fullshape[2]:]),dim=1));
         bdiff = zt_fb - zt0[:,0:fullshape[2]]
         fitlossb = .5*torch.sum(bdiff**2,dim=1).mean()
     
-#         pdb.set_trace()
-        
         if batch==0:
             # scaling factor chosen at start to normalize fitting loss
             fitloss0 = fitloss.item(); # constant. not differentiated through
@@ -232,7 +178,6 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
                 ax1.scatter(z_t.cpu().detach().numpy()[t,:,0], z_t.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c=cols1[t], edgecolors='black')
                 ax1.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c=cols2[t], edgecolors='black')
             ax1.axis('equal')
-            
             model.showmap(t=0,ax=ax2); # ax2.axis('equal')
             model.showmap(t=1,ax=ax3)
             plt.show()
@@ -245,22 +190,14 @@ def learn_trajectory(z_target_full, my_loss, n_iters = 10, n_subsample = 100, mo
             print('batch number',batch,'out of',n_iters)
             savetimebegin = time.time()
             if save and batch > 0:
-#                 model.save_state(fn='models/state_' + f"{batch:04}" + '_time_' + str(ptime) + '_' + str(losses[batch]) + '.tar')
-                st.save_trajectory(model,z_target[:,1:4000,:],my_loss + "_" + f"{batch:04}", savedir='imgs', nsteps=10, memory=0.01, n=1000)
-                st.trajectory_to_video(my_loss + "_" + f"{batch:04}", savedir='imgs', mp4_fn='transform.mp4')
-#                 st.save_trajectory(model,z_target,my_loss + "_" + f"{batch:04}", savedir='imgs', nsteps=20, memory=0.01, n=1000, reverse = True)
-#             ## check garbage collected tensor list for increase in tensor sizes or number of objects.
-#             cc = 0;
-#             for obj in gc.get_objects():
-#                 try:
-#                     if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
-#                         cc+=1;
-#                         print(type(obj), obj.size(), obj.grad_fn)
-#                 except:
-#                     pass
-#             print('nobjs ', cc);
+                model.save_state(fn='models/state_' + f"{batch:04}" + '_' + str(losses[batch]) + '.tar')
+                st.save_trajectory(model,z_target[:,1:4000,:], "fit_" + f"{batch:04}", savedir='imgs', nsteps=10, memory=0.01, n=1000)
+                st.trajectory_to_video("fit_" + f"{batch:04}", savedir='imgs', mp4_fn='transform.mp4')
             print('savetime',time.time()-savetimebegin)
-
+        
+        if save:
+            model.save_state(fn='models/state_end.tar')
+        
         fitloss.detach();
         z_t.detach();
         loss.detach();
