@@ -24,7 +24,7 @@ def learn_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=coord
 #     currlr = 2e-3;
     currlr = 1e-4;
 #     currlr = 1e-6;
-    stepsperbatch=150
+    stepsperbatch=50
     optimizer = torch.optim.Adam(list(model.parameters()) + list(bmodel.parameters()), lr=currlr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',factor=.5,patience=1,min_lr=1e-7)
     
@@ -131,7 +131,7 @@ def learn_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=coord
         regloss = noninversionloss.mean()*0 \
                 + veloc_norms_2.mean()*0 \
                 + Mnoninversionloss.mean()*0 \
-                + KE.mean()*.0001
+                + KE.mean()*.0000
 #         regloss = 0*div2loss.mean() \
 #                 + 0*.005*curl2loss.mean() \
 #                 + 0*rigid2loss.mean() \
@@ -171,10 +171,11 @@ def learn_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=coord
             print('batch',batch,'loss',loss)
 #             plt.scatter(z_target.cpu().detach().numpy()[0,:,0], z_target.cpu().detach().numpy()[0,:,1], s=10, alpha=.5, linewidths=0, c='green', edgecolors='black')
             f, (ax1, ax2, ax3) = plt.subplots(1, 3)
-            cols1 = ['blue','cyan']
-            cols2 = ['green','red']
+            cols1 = ['blue','blue','blue','blue','blue','blue']
+            cols2 = ['green','green','green','green','green','green']
             for t in range(0,T):
 #                 plt.scatter(z_t_b.cpu().detach().numpy()[t,:,0], z_t_b.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c='red', edgecolors='black')
+#                 pdb.set_trace()
                 ax1.scatter(z_t.cpu().detach().numpy()[t,:,0], z_t.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c=cols1[t], edgecolors='black')
                 ax1.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c=cols2[t], edgecolors='black')
             ax1.axis('equal')

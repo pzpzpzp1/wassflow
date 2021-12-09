@@ -10,8 +10,8 @@ import torch.nn as nn
 from torch import Tensor
 from torch.nn  import functional as F 
 from torch.autograd import Variable
-#from torchdiffeq import odeint_adjoint as odeint
-#from torch.distributions import MultivariateNormal
+from torchdiffeq import odeint_adjoint as odeint
+# from torch.distributions import MultivariateNormal
 use_cuda = torch.cuda.is_available()
 #from geomloss import SamplesLoss
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
