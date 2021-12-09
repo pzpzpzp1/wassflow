@@ -175,22 +175,20 @@ class BoundingBox():
     
 # fourier features mapping
 class InputMapping(nn.Module):
-    def __init__(self, d_in, n_freq, sigma=2):
+    def __init__(self, d_in, n_freq, sigma=2, tdiv = 2):
         super().__init__()
         Bmat = torch.randn(n_freq, d_in) * sigma/np.sqrt(d_in)/2.0; # gaussian
-        Bmat[:,d_in-1] /= 6; # time frequencies are a quarter of spacial frequencies.
-        self.B = nn.Parameter(Bmat, requires_grad=False).to(device) 
-#         self.B = nn.Parameter((torch.rand(n_freq, d_in)-.5) * 2 * sigma/np.sqrt(d_in), requires_grad=False).to(device) # uniform
+        Bmat[:,d_in-1] /= tdiv; # time frequencies are a quarter of spacial frequencies.
         self.d_in = d_in;
         self.n_freq = n_freq;
-#         self.d_out = n_freq * 2 + d_in - 1;
         self.d_out = n_freq * 2 + d_in;
+        self.B = nn.Linear(d_in, self.d_out, bias=False)
+        with torch.no_grad():
+            self.B.weight = nn.Parameter(Bmat.to(device), requires_grad=False)
     def forward(self, xi):
-        # x = (xi/(2*np.pi)) @ self.B.T
-        x = (2*np.pi*xi) @ self.B.T
-        # pdb.set_trace()
+        y = self.B(2*np.pi*xi)
         # return torch.cat([torch.sin(x), torch.cos(x), xi[:,[1, 2]]], dim=-1)
-        return torch.cat([torch.sin(x), torch.cos(x), xi], dim=-1)
+        return torch.cat([torch.sin(y), torch.cos(y), xi], dim=-1)
 
 class SaveTrajectory():
     # """Sample from a distribution defined by an image."""

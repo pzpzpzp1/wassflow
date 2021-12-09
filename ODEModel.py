@@ -211,25 +211,26 @@ def _flip(x, dim):
     return x[tuple(indices)]
 
 class coordMLP(nn.Module):
-    def __init__(self, in_features=3, hidden_features=512, hidden_layers=2, out_features=2, sigmac = 10, n_freq = 256):
+    def __init__(self, in_features=3, hidden_features=512, hidden_layers=2, out_features=2, sigmac = 10, n_freq = 256, tdiv = 6):
         super().__init__()
-        ## RFF net
-#         n_freq = 256; # sigmac = 10; # frequencies to sample spacetime in.
-#         n_freq = 50; sigmac = 4; # frequencies to sample spacetime in.
-#         n_freq = 70; sigmac = 3; # frequencies to sample spacetime in.
-    
-        imap = InputMapping(in_features, n_freq, sigma=sigmac);
-        self.imap = imap; 
-        self.net = []
-        self.net.append(imap)
-        self.net.append(nn.Linear(imap.d_out, hidden_features))
-        for i in range(hidden_layers):
-            self.net.append(nn.Tanh())
-            self.net.append(nn.Linear(hidden_features, hidden_features))
-        self.net.append(nn.Softplus())
-        self.net.append(nn.Linear(hidden_features, out_features));
-        self.net = nn.Sequential(*self.net)
+        
+        # net1 is forward, net2 is backward
+        self.imap1, self.net1 = coordMLP.mlp(in_features, hidden_features, hidden_layers, out_features, sigmac, n_freq, tdiv)
+        self.imap2, self.net2 = coordMLP.mlp(in_features, hidden_features, hidden_layers, out_features, sigmac, n_freq, tdiv)
             
+    def mlp(in_features=3, hidden_features=512, hidden_layers=2, out_features=2, sigmac = 10, n_freq = 256, tdiv = 6):
+        imap = InputMapping(in_features, n_freq, sigma=sigmac, tdiv = tdiv)
+        net = []
+        net.append(imap)
+        net.append(nn.Linear(imap.d_out, hidden_features))
+        for i in range(hidden_layers):
+            net.append(nn.Tanh())
+            net.append(nn.Linear(hidden_features, hidden_features))
+        net.append(nn.Softplus())
+        net.append(nn.Linear(hidden_features, out_features));
+        net = nn.Sequential(*net)
+        return imap, net
+    
     def save_state(self, fn='state.tar'):
         torch.save(self.state_dict(), fn)
     def load_state(self, fn='state.tar'):
@@ -272,9 +273,16 @@ class coordMLP(nn.Module):
         return out, jacobians
     
     def forward(self, coords):
-#         coords = coords.clone().detach().requires_grad_(True) # allows to take derivative w.r.t. input
         coords = coords.requires_grad_(True) # allows to take derivative w.r.t. input
-        disp = self.net(coords)
+        disp = self.net1(coords)
+        
+        dispT = torch.mul(coords[:,-1:], disp)
+        output = coords[:,0:2] + dispT; # learn displacement. guarantees t=0 frame is identity.
+        
+        return output, coords
+    def backward(self, coords):
+        coords = coords.requires_grad_(True) # allows to take derivative w.r.t. input
+        disp = self.net2(coords)
         
         dispT = torch.mul(coords[:,-1:], disp)
         output = coords[:,0:2] + dispT; # learn displacement. guarantees t=0 frame is identity.

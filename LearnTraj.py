@@ -11,21 +11,21 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 from Utils import InputMapping, BoundingBox, ImageDataset, SaveTrajectory, MiscTransforms, SaveTrajectory as st, SpecialLosses as sl
 from ODEModel import ODEfunc, coordMLP, FfjordModel
 
-def learn_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=coordMLP(), bmodel=coordMLP(), save=False):
+def learn_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=coordMLP(), save=False):
     z_target_full, __ = ImageDataset.normalize_samples(z_target_full) # normalize to fit in [0,1] box.
     my_loss_f = SamplesLoss("sinkhorn", p=2, blur=0.00001)
 
 #     model = FfjordModel(); 
     model.to(device)
-    bmodel.to(device)
-    max_n_subsample = 3000; # more is too slow. 2000 is enough to get a reasonable capture of the image per iter.
+    max_n_subsample = 2000; # more is too slow. 2000 is enough to get a reasonable capture of the image per iter.
     if n_subsample > max_n_subsample:
         n_subsample = max_n_subsample
 #     currlr = 2e-3;
     currlr = 1e-4;
 #     currlr = 1e-6;
     stepsperbatch=50
-    optimizer = torch.optim.Adam(list(model.parameters()) + list(bmodel.parameters()), lr=currlr)
+#     optimizer = torch.optim.Adam(list(model.parameters()) + list(bmodel.parameters()), lr=currlr)
+    optimizer = torch.optim.Adam(list(model.parameters()), lr=currlr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',factor=.5,patience=1,min_lr=1e-7)
     
     T = z_target_full.shape[0];
@@ -68,7 +68,7 @@ def learn_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=coord
         fbt = torch.rand(15, 1).to(device)*(T-1.);
         zt0 = MiscTransforms.z_t_to_zt(z_target[0,:,:], t = fbt)
         zt_f, zt_grad0 = model.getGrads(zt0); 
-        (zt_fb, coords) = bmodel(torch.cat((zt_f, zt0[:,fullshape[2]:]),dim=1));
+        (zt_fb, coords) = model.backward(torch.cat((zt_f, zt0[:,fullshape[2]:]),dim=1));
         bdiff = zt_fb - zt0[:,0:fullshape[2]]
         fitlossb = .5*torch.sum(bdiff**2,dim=1).mean()
     
@@ -150,9 +150,9 @@ def learn_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=coord
         totalloss.backward()
         optimizer.step()
         
-        if (batch>1 and batch % 150 == 0):
+        if (batch>1 and batch % 50 == 0):
             # increase n_subsample by factor. note this does decrease wasserstein loss because sampling is a biased estimator.
-            fac = 1.83; 
+            fac = 1.26; 
             n_subsample_p = n_subsample
             n_subsample=round(n_subsample*fac)
             if n_subsample > z_target_full.shape[1]:
@@ -191,13 +191,10 @@ def learn_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=coord
             print('batch number',batch,'out of',n_iters)
             savetimebegin = time.time()
             if save and batch > 0:
-                model.save_state(fn='models/state_' + f"{batch:04}" + '_' + str(losses[batch]) + '.tar')
+                model.save_state(fn='models/state_' + f"{batch:04}" + '.tar')
                 st.save_trajectory(model,z_target[:,1:4000,:], "fit_" + f"{batch:04}", savedir='imgs', nsteps=10, memory=0.01, n=1000)
                 st.trajectory_to_video("fit_" + f"{batch:04}", savedir='imgs', mp4_fn='transform.mp4')
             print('savetime',time.time()-savetimebegin)
-        
-        if save:
-            model.save_state(fn='models/state_end.tar')
         
         fitloss.detach();
         z_t.detach();
@@ -205,5 +202,7 @@ def learn_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=coord
         totalloss.detach();
         del loss;
         torch.cuda.empty_cache()
+    if save:
+        model.save_state(fn='models/state_end.tar')
     return model, losses, separate_losses, lrs, n_subs
 
