@@ -91,7 +91,7 @@ class ODEfunc(nn.Module):
                 z_dot = F.softplus(z_dot)
         return z_dot
 
-    d z_dot d z. assuming zdot was computed from z. otherwise output is just 0.
+#     d z_dot d z. assuming zdot was computed from z. otherwise output is just 0.
     def getJacobians(self, t, z):
         batchsize = z.shape[0]
 
