@@ -134,7 +134,7 @@ def learn_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=coord
                 + veloc_norms_2.mean()*0 \
                 + Mnoninversionloss.mean()*0 \
                 + KE.mean()*.00000 \
-                + Forces.mean()*.01
+                + Forces.mean()*.00001
 #         regloss = 0*div2loss.mean() \
 #                 + 0*.005*curl2loss.mean() \
 #                 + 0*rigid2loss.mean() \

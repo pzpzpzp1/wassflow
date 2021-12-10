@@ -269,9 +269,12 @@ class coordMLP(nn.Module):
         out: N d
         jacs: 
         """
-        (out, throwaway) = self.forward(zt)
+        zt.requires_grad = True
         dv = zt.shape[1]-1;
         batchsize = zt.shape[0];
+        z = zt[:,0:dv]
+        t = zt[:,dv:]
+        (out, throwaway) = self.forward(torch.cat((z,t),1))
         
         jacobians = torch.zeros([batchsize, dv, dv+1], dtype=zt.dtype, device=zt.device);
         for i in range(dv):
@@ -279,8 +282,7 @@ class coordMLP(nn.Module):
         
         acceleration = torch.zeros([batchsize, dv], dtype=zt.dtype, device=zt.device);
         for i in range(dv):
-            tempdev = torch.autograd.grad(jacobians[:, i, dv].sum(), zt, create_graph=True)[0];
-            acceleration[:,i] = tempdev[:,dv]
+            acceleration[:,i] = torch.autograd.grad(jacobians[:, i, dv].sum(), t, create_graph=True)[0].reshape(-1);
         
         return out, jacobians, acceleration
     
