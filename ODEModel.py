@@ -175,13 +175,19 @@ class FfjordModel(torch.nn.Module):
         jacs: 
         """
         out = self.forward_zt(zt)
-        d = zt.shape[1]-1;
+        dv = zt.shape[1]-1;
         batchsize = zt.shape[0];
         
-        jacobians = torch.zeros([batchsize, d, d+1], dtype=zt.dtype, device=zt.device);
-        for i in range(d):
+        jacobians = torch.zeros([batchsize, dv, dv+1], dtype=zt.dtype, device=zt.device);
+        for i in range(dv):
             jacobians[:,i,:] = torch.autograd.grad( out[:, i].sum(), zt, create_graph=True)[0]
-        return out, jacobians
+            
+        acceleration = torch.zeros([batchsize, dv], dtype=zt.dtype, device=zt.device);
+        for i in range(dv):
+            tempdev = torch.autograd.grad(jacobians[:, i, dv].sum(), zt, create_graph=True)[0];
+            acceleration[:,i] = tempdev[:,dv]
+            
+        return out, jacobians, acceleration
         
     def forward_zt(self, zt):
         """
@@ -264,13 +270,19 @@ class coordMLP(nn.Module):
         jacs: 
         """
         (out, throwaway) = self.forward(zt)
-        d = zt.shape[1]-1;
+        dv = zt.shape[1]-1;
         batchsize = zt.shape[0];
         
-        jacobians = torch.zeros([batchsize, d, d+1], dtype=zt.dtype, device=zt.device);
-        for i in range(d):
+        jacobians = torch.zeros([batchsize, dv, dv+1], dtype=zt.dtype, device=zt.device);
+        for i in range(dv):
             jacobians[:,i,:] = torch.autograd.grad( out[:, i].sum(), zt, create_graph=True)[0]
-        return out, jacobians
+        
+        acceleration = torch.zeros([batchsize, dv], dtype=zt.dtype, device=zt.device);
+        for i in range(dv):
+            tempdev = torch.autograd.grad(jacobians[:, i, dv].sum(), zt, create_graph=True)[0];
+            acceleration[:,i] = tempdev[:,dv]
+        
+        return out, jacobians, acceleration
     
     def forward(self, coords):
         coords = coords.requires_grad_(True) # allows to take derivative w.r.t. input

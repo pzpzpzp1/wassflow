@@ -67,7 +67,7 @@ def learn_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=coord
         ## random time backwards fitloss
         fbt = torch.rand(15, 1).to(device)*(T-1.);
         zt0 = MiscTransforms.z_t_to_zt(z_target[0,:,:], t = fbt)
-        zt_f, zt_grad0 = model.getGrads(zt0); 
+        zt_f, zt_grad0, accel = model.getGrads(zt0); 
         (zt_fb, coords) = model.backward(torch.cat((zt_f, zt0[:,fullshape[2]:]),dim=1));
         bdiff = zt_fb - zt0[:,0:fullshape[2]]
         fitlossb = .5*torch.sum(bdiff**2,dim=1).mean()
@@ -95,11 +95,13 @@ def learn_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=coord
         separate_losses[4,batch] = Mnoninversionloss.mean().item()
         KE = (torch.norm(zt_grad0[:,:,dim],p=2,dim=1)**2);
         separate_losses[5,batch] = KE.mean().item()
+        Forces = (torch.norm(accel,p=2,dim=1)**2);
+        separate_losses[6,batch] = Forces.mean().item()
         
 #         z_sample = BB.samplerandom(N = 2000, bbscale = 1.1); 
         z_sample = BoundingBox.samplecustom(N = 10); 
 #         pdb.set_trace()
-        z_dots, zt_grad = model.getGrads(z_sample); dim = zt_grad.shape[1]
+        z_dots, zt_grad, __ = model.getGrads(z_sample); dim = zt_grad.shape[1]
         jac = zt_grad[:,0:dim,0:dim];
         noninversionloss = sl.jacdetloss(jac);
         separate_losses[2,batch] = noninversionloss.mean().item()
@@ -131,7 +133,8 @@ def learn_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=coord
         regloss = noninversionloss.mean()*0 \
                 + veloc_norms_2.mean()*0 \
                 + Mnoninversionloss.mean()*0 \
-                + KE.mean()*.0000
+                + KE.mean()*.00000 \
+                + Forces.mean()*.01
 #         regloss = 0*div2loss.mean() \
 #                 + 0*.005*curl2loss.mean() \
 #                 + 0*rigid2loss.mean() \
@@ -141,7 +144,7 @@ def learn_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=coord
 #         - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
         reglosstime = time.time()-cpt
 #         pdb.set_trace()
-        loss = fitloss + 1*fitlossb; 
+        loss = fitloss + .5*fitlossb; 
         totalloss = loss + regloss
         losses.append(totalloss.item())
         n_subs.append(n_subsample)
