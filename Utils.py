@@ -202,6 +202,76 @@ class SaveTrajectory():
         reserved = round(torch.cuda.memory_reserved(devnum)/1024**3,2);
         print('Allocated:', allocated, 'GB', ' Reserved:', reserved, 'GB')
     
+    def save_trajectory_vel(model,z_target, my_loss, savedir='imgs', nsteps=20, memory=0.01, n=1000, reverse=False, dpiv=100):
+        """
+        Plot the dynamics of the learned ODE.
+        Saves images to `savedir`.
+        Parameters
+        ----------
+        model : FfjordModel
+            Model defining the dynamics.
+        z_target : torch.Tensor 
+            Tensor of shape (T,n,d) where T is the number of timesteps
+        myloss : str
+            Name of loss used to train the model
+        savedir : str, optional
+            Where to save output.
+        ntimes : int, optional
+            Number of timesteps to visualize.
+        memory : float
+            Controls how finely the density grid is sampled.
+        n : int, optional
+            Number of samples to visualize.
+        """
+
+        BB = BoundingBox(z_target);
+        z_sample = BB.sampleuniform(t_N = 1, x_N = 20, y_N = 20);
+
+        if reverse: 
+            my_loss+='_neg';
+
+        final_dir = savedir+'/'+my_loss
+        if not os.path.exists(final_dir):
+            os.makedirs(final_dir)
+
+        T = z_target.shape[0]
+        integration_times = torch.linspace(0,T-1,nsteps).to(device);
+        if reverse:
+            x_traj = model(z_target[T-1,:,:], integration_times, reverse=reverse).cpu().detach(); 
+        else:
+            x_traj = model(z_target[0,:,:], integration_times, reverse=reverse).cpu().detach()
+
+        x_traj = x_traj.detach().numpy()
+
+        for i in range(nsteps):
+            t = integration_times[i];
+            if reverse:
+                t = integration_times[(T-1)-i];
+
+            z_dots = model.velfunc.get_z_dot(z_sample[:,0]*0.0 + t, z_sample[:,1:]);
+            z_sample_d = z_sample.cpu().detach().numpy();
+            z_dots_d = z_dots.cpu().detach().numpy();
+            
+            for t in range(T):
+                plt.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c='green', edgecolors='black')
+            
+            plt.quiver(z_sample_d[:,1], z_sample_d[:,2], z_dots_d[:,0], z_dots_d[:,1])
+
+            plt.scatter(x_traj[i,:,0], x_traj[i,:,1], s=10, alpha=.5, linewidths=0, c='blue', edgecolors='black')
+            
+            plt.axis('equal')
+            plt.savefig(os.path.join(final_dir, f"viz-{i:05d}.jpg"),dpi=dpiv)
+            plt.clf()
+
+    #         plt.scatter(x_traj[i,:,0], x_traj[i,:,1], s=2.3, alpha=1, linewidths=0.1, c='blue')
+    #         plt.scatter(dat.detach().numpy()[:,0],dat.detach().numpy()[:,1],s=2.3, alpha=0.1, linewidths=5,c='green')
+    #         plt.scatter(dat2.detach().numpy()[:,0],dat2.detach().numpy()[:,1],s=2.3, alpha=0.1, linewidths=5,c='green')
+    #         plt.scatter(dat3.detach().numpy()[:,0],dat3.detach().numpy()[:,1],s=2.3, alpha=0.1, linewidths=5,c='green')
+    #         plt.savefig(os.path.join(final_dir, f"viz-{i:05d}.jpg"))
+    #         plt.clf()
+
+        # SaveTrajectory.trajectory_to_video(my_loss, savedir, mp4_fn='transform.mp4');
+
     def save_trajectory(model,z_target, my_loss, savedir='imgs', nsteps=20, memory=0.01, n=1000, reverse=False, dpiv=100):
         """
         Plot the dynamics of the learned ODE.
