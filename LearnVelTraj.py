@@ -11,11 +11,12 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 from Utils import InputMapping, BoundingBox, ImageDataset, SaveTrajectory, MiscTransforms, SaveTrajectory as st, SpecialLosses as sl
 from ODEModel import velocMLP, coordMLP, FfjordModel
 import os
+# import tensorflow as tf
 
-def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=FfjordModel(), save=False, outname = 'results/outcache/'):
+def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=FfjordModel(), outname = 'results/outcache/', visualize=False):
     z_target_full, __ = ImageDataset.normalize_samples(z_target_full) # normalize to fit in [0,1] box.
     my_loss_f = SamplesLoss("sinkhorn", p=2, blur=0.00001)
-    if save and not os.path.exists(outname):
+    if not os.path.exists(outname):
         os.makedirs(outname)
         
     model.to(device)
@@ -175,42 +176,48 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
                 print('lr',currlr)
             
             print('batch',batch,'loss',loss)
-            f, (ax1, ax2) = plt.subplots(1, 2)
-            z_t = model(z_target[0,:,:], integration_times = torch.linspace(0,T-1,T).to(device))
-            for t in range(0,T):
-                ax1.scatter(z_t.cpu().detach().numpy()[t,:,0], z_t.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c='blue', edgecolors='black')
-                ax1.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c='green', edgecolors='black')
-            ax1.axis('equal')
             
-            z_t = model(z_target[T-1,:,:], integration_times = torch.linspace(T-1, 0, T).to(device))
-            for t in range(0,T):
-                ax2.scatter(z_t.cpu().detach().numpy()[t,:,0], z_t.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c="blue", edgecolors='black')
-                ax2.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c="green", edgecolors='black')
-            ax2.axis('equal')
-            plt.show()
-            
-#             pdb.set_trace()
+            if visualize:
+                f, (ax1, ax2) = plt.subplots(1, 2)
+                z_t = model(z_target[0,:,:], integration_times = torch.linspace(0,T-1,T).to(device))
+                for t in range(0,T):
+                    ax1.scatter(z_t.cpu().detach().numpy()[t,:,0], z_t.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c='blue', edgecolors='black')
+                    ax1.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c='green', edgecolors='black')
+                ax1.axis('equal')
+
+                z_t = model(z_target[T-1,:,:], integration_times = torch.linspace(T-1, 0, T).to(device))
+                for t in range(0,T):
+                    ax2.scatter(z_t.cpu().detach().numpy()[t,:,0], z_t.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c="blue", edgecolors='black')
+                    ax2.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c="green", edgecolors='black')
+                ax2.axis('equal')
+                plt.show()
             
             ptime = time.time()-start
 #             print('fit time ',fitlosstime,' reg loss time',reglosstime)
             print('time elapsed',ptime,'total time',time.time()-start0)
             print('batch number',batch,'out of',n_iters)
             savetimebegin = time.time()
-            if save and batch > 0:
-                model.save_state(fn=outname + 'state_' + f"{batch:04}" + '.tar')
-                subsample_inds = torch.randperm(z_target.shape[1])[:4000];
-                st.save_trajectory(model, z_target[:,subsample_inds,:], savedir=outname+"fit_" + f"{batch:04}" + "/", nsteps=10)
+            if batch > 0:
+                st.save_trajectory(model, z_target, savedir=outname, savename=f"{batch:04}", nsteps=10, n=4000)
             print('savetime',time.time()-savetimebegin)
         
-        fitloss.detach();
-        z_t.detach();
-        loss.detach();
-        totalloss.detach();
-        del loss;
-        torch.cuda.empty_cache()
-    if save:
-        model.save_state(fn=outname + 'state_end.tar')
-        subsample_inds = torch.randperm(z_target.shape[1])[:4000];
-        st.save_trajectory(model, z_target[:,subsample_inds,:], savedir=outname, nsteps=40, dpiv=400)
+        # fitloss.detach();
+        # z_t.detach();
+        # loss.detach();
+        # totalloss.detach();
+        # del loss;
+        # torch.cuda.empty_cache()
+    st.save_trajectory(model, z_target, savedir=outname, savename='final', nsteps=40, dpiv=400, n=4000)
+    
+    # save stats
+    (fig,(ax1,ax2,ax3))=plt.subplots(3,1)
+    ax1.plot(n_subs,'r'); ax1.set_ylabel('n_sub')
+    ax2.plot(lrs,'g'); ax2.set_ylabel('lr') 
+    ax3.plot(losses,'b'); ax3.set_ylabel('loss') 
+    plt.savefig(savedir + "stats.pdf"); 
+    
+    # save summary data:
+    # file = open(savedir + "summary.txt","w")
+    
     return model, losses, separate_losses, lrs, n_subs
 

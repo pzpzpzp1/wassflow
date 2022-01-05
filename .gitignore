@@ -3,3 +3,5 @@ imgs/*
 models/*
 __pycache__/*
 /viz_loss.jpg
+results/outcache/*
+

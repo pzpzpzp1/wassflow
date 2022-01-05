@@ -4,6 +4,8 @@ from IPython.display import clear_output
 import pdb
 import time
 import matplotlib.pyplot as plt
+import matplotlib
+import matplotlib.animation
 import torch
 import torchvision
 import torch.nn as nn
@@ -198,11 +200,18 @@ class SaveTrajectory():
         reserved = round(torch.cuda.memory_reserved(devnum)/1024**3,2);
         print('Allocated:', allocated, 'GB', ' Reserved:', reserved, 'GB')
     
-    def save_trajectory(model, z_target, savedir='results/outcache/', nsteps=20, dpiv=100):
-        final_dir = savedir
-        if not os.path.exists(final_dir):
-            os.makedirs(final_dir)
-
+    def save_trajectory(model, z_target_full, savedir='results/outcache/', savename = '', nsteps=20, dpiv=100, n=4000):
+        # save model
+        if not os.path.exists(savedir+'models/'):
+            os.makedirs(savedir+'models/')
+        model.save_state(fn=savedir + 'models/state_' + savename + '.tar')
+        
+        # save trajectory video0
+        if n > z_target_full.shape[1]:
+            n = z_target_full.shape[1]
+        subsample_inds = torch.randperm(z_target_full.shape[1])[:n]
+        z_target = z_target_full[:,subsample_inds,:]
+        
         BB = BoundingBox(z_target);
         z_sample = BB.sampleuniform(t_N = 1, x_N = 20, y_N = 20)
         z_sample_d = z_sample.cpu().detach().numpy();
@@ -213,53 +222,41 @@ class SaveTrajectory():
         x_traj_forward = model(z_target[0,:,:], integration_times, reverse=False).cpu().detach().numpy()
         
         # forward
-        for i in range(nsteps):
-            for t in range(T):
-                plt.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c='green', edgecolors='black')
-            x_traj = x_traj_forward
-            
-            # plot velocities
-            z_dots_d = model.velfunc.get_z_dot(z_sample[:,0]*0.0 + integration_times[i], z_sample[:,1:]).cpu().detach().numpy();
-            plt.quiver(z_sample_d[:,1], z_sample_d[:,2], z_dots_d[:,0], z_dots_d[:,1])
-            plt.scatter(x_traj[i,:,0], x_traj[i,:,1], s=10, alpha=.5, linewidths=0, c='blue', edgecolors='black')
-            
-            plt.axis('equal')
-            plt.savefig(os.path.join(final_dir, f"forward-{i:05d}.jpg"),dpi=dpiv)
-            plt.clf()
+        moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
+        fig = plt.figure()
+        with moviewriter.saving(fig, savedir+'forward_'+savename+'.mp4', dpiv):
+            for i in range(nsteps):
+                for t in range(T):
+                    plt.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c='green', edgecolors='black')
+                x_traj = x_traj_forward
+
+                # plot velocities
+                z_dots_d = model.velfunc.get_z_dot(z_sample[:,0]*0.0 + integration_times[i], z_sample[:,1:]).cpu().detach().numpy();
+                plt.quiver(z_sample_d[:,1], z_sample_d[:,2], z_dots_d[:,0], z_dots_d[:,1])
+                plt.scatter(x_traj[i,:,0], x_traj[i,:,1], s=10, alpha=.5, linewidths=0, c='blue', edgecolors='black')
+
+                plt.axis('equal')
+                moviewriter.grab_frame()
+                plt.clf()
+            moviewriter.finish()
             
         # reverse
-        for i in range(nsteps):
-            for t in range(T):
-                plt.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c='green', edgecolors='black')
-            x_traj = x_traj_reverse
-            
-            # plot velocities
-            z_dots_d = model.velfunc.get_z_dot(z_sample[:,0]*0.0 + integration_times[(T-1)-i], z_sample[:,1:]).cpu().detach().numpy();
-            plt.quiver(z_sample_d[:,1], z_sample_d[:,2], -z_dots_d[:,0], -z_dots_d[:,1])
-            plt.scatter(x_traj[i,:,0], x_traj[i,:,1], s=10, alpha=.5, linewidths=0, c='blue', edgecolors='black')
-            
-            plt.axis('equal')
-            plt.savefig(os.path.join(final_dir, f"reverse-{i:05d}.jpg"),dpi=dpiv)
-            plt.clf()
+        moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
+        with moviewriter.saving(fig, savedir+'reverse_'+savename+'.mp4', dpiv):
+            for i in range(nsteps):
+                for t in range(T):
+                    plt.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c='green', edgecolors='black')
+                x_traj = x_traj_reverse
 
-        SaveTrajectory.trajectory_to_video(savedir);
+                # plot velocities
+                z_dots_d = model.velfunc.get_z_dot(z_sample[:,0]*0.0 + integration_times[(T-1)-i], z_sample[:,1:]).cpu().detach().numpy();
+                plt.quiver(z_sample_d[:,1], z_sample_d[:,2], -z_dots_d[:,0], -z_dots_d[:,1])
+                plt.scatter(x_traj[i,:,0], x_traj[i,:,1], s=10, alpha=.5, linewidths=0, c='blue', edgecolors='black')
 
-    def trajectory_to_video(savedir, mp4_fn='transform.mp4',reverse=False):
-        """Save the images written by `save_trajectory` as an mp4."""
-        import subprocess
-        
-        final_dir = savedir
-        img_fns_f = os.path.join(final_dir, 'forward-%05d.jpg')
-        img_fns_b = os.path.join(final_dir, 'reverse-%05d.jpg')
-        video_fn_f = os.path.join(final_dir, "forward.mp4")
-        video_fn_b = os.path.join(final_dir, "reverse.mp4")
-        bashCommand_f = 'ffmpeg -loglevel quiet -y -i {} {}'.format(img_fns_f, video_fn_f)
-        bashCommand_b = 'ffmpeg -loglevel quiet -y -i {} {}'.format(img_fns_b, video_fn_b)
-        process_f = subprocess.Popen(bashCommand_f.split(), stdout=subprocess.PIPE);
-        process_b = subprocess.Popen(bashCommand_b.split(), stdout=subprocess.PIPE);
-        output, error = process_f.communicate();
-        output, error = process_b.communicate();
-        torch.cuda.empty_cache()
+                plt.axis('equal')
+                moviewriter.grab_frame()
+                plt.clf()
+            moviewriter.finish()
         
 class MiscTransforms():
     def z_t_to_zt(z, t):
