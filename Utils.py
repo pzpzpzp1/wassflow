@@ -201,6 +201,7 @@ class SaveTrajectory():
         print('Allocated:', allocated, 'GB', ' Reserved:', reserved, 'GB')
     
     def save_trajectory(model, z_target_full, savedir='results/outcache/', savename = '', nsteps=20, dpiv=100, n=4000):
+        
         # save model
         if not os.path.exists(savedir+'models/'):
             os.makedirs(savedir+'models/')
@@ -257,6 +258,7 @@ class SaveTrajectory():
                 moviewriter.grab_frame()
                 plt.clf()
             moviewriter.finish()
+            plt.close(fig)
         
 class MiscTransforms():
     def z_t_to_zt(z, t):

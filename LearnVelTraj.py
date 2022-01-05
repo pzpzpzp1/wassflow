@@ -11,6 +11,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 from Utils import InputMapping, BoundingBox, ImageDataset, SaveTrajectory, MiscTransforms, SaveTrajectory as st, SpecialLosses as sl
 from ODEModel import velocMLP, coordMLP, FfjordModel
 import os
+from tqdm import tqdm
 # import tensorflow as tf
 
 def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=FfjordModel(), outname = 'results/outcache/', visualize=False):
@@ -42,8 +43,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
     if n_subsample > fullshape[1]:
         n_subsample = fullshape[1]
     subsample_inds = torch.randperm(fullshape[1])[:n_subsample];
-    for batch in range(n_iters):
-        print(batch, end=' ')
+    for batch in tqdm(range(n_iters)):
         if (batch % stepsperbatch == 1):
             start = time.time()
 
@@ -166,17 +166,12 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
                 n_subsample = z_target_full.shape[1]
             if n_subsample > max_n_subsample:
                 n_subsample = max_n_subsample
-            if n_subsample != n_subsample_p:
-                print('n_subsample', n_subsample)
             
         if (batch % stepsperbatch == 0):
             scheduler.step(totalloss.item()) # timestep schedule.
             for g in optimizer.param_groups:
                 currlr = g['lr'];
-                print('lr',currlr)
-            
-            print('batch',batch,'loss',loss)
-            
+                
             if visualize:
                 f, (ax1, ax2) = plt.subplots(1, 2)
                 z_t = model(z_target[0,:,:], integration_times = torch.linspace(0,T-1,T).to(device))
@@ -193,20 +188,16 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
                 plt.show()
             
             ptime = time.time()-start
-#             print('fit time ',fitlosstime,' reg loss time',reglosstime)
-            print('time elapsed',ptime,'total time',time.time()-start0)
-            print('batch number',batch,'out of',n_iters)
+            
             savetimebegin = time.time()
             if batch > 0:
                 st.save_trajectory(model, z_target, savedir=outname, savename=f"{batch:04}", nsteps=10, n=4000)
-            print('savetime',time.time()-savetimebegin)
-        
-        # fitloss.detach();
-        # z_t.detach();
-        # loss.detach();
-        # totalloss.detach();
-        # del loss;
-        # torch.cuda.empty_cache()
+            savetime = time.time()-savetimebegin
+            
+            # print summary stats
+            st.gpu_usage()
+            print('(loss:',f"{loss.item():.4f})",'(lr:',f"{currlr})", '(n_subsample:', f"{n_subsample})",'\n(time elapsed:',f"{ptime:.4f})",'(total time:',f"{(time.time()-start0):.4f})",'(fit time:',f"{fitlosstime:.4f})",'(reg loss time:',f"{reglosstime:.4f})",'(savetime:',f"{savetime:.4f})")
+
     st.save_trajectory(model, z_target, savedir=outname, savename='final', nsteps=40, dpiv=400, n=4000)
     
     # save stats
@@ -214,10 +205,11 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
     ax1.plot(n_subs,'r'); ax1.set_ylabel('n_sub')
     ax2.plot(lrs,'g'); ax2.set_ylabel('lr') 
     ax3.plot(losses,'b'); ax3.set_ylabel('loss') 
-    plt.savefig(savedir + "stats.pdf"); 
+    plt.savefig(outname + "stats.pdf"); 
+    plt.close(fig)
     
     # save summary data:
-    # file = open(savedir + "summary.txt","w")
+    # file = open(outname + "summary.txt","w")
     
     return model, losses, separate_losses, lrs, n_subs
 

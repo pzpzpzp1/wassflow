@@ -170,12 +170,27 @@ class velocMLP(nn.Module):
 class FfjordModel(torch.nn.Module):
     
     def __init__(self, in_features=3, hidden_features=512, hidden_layers=2, out_features=2, sigmac = 3, n_freq = 70, tdiv = 1):
-        super(FfjordModel, self).__init__()        
+        super(FfjordModel, self).__init__()
+        self.modelshape = {'in_features': in_features, \
+                           'hidden_features': hidden_features,\
+                           'hidden_layers': hidden_layers,\
+                           'out_features': out_features,\
+                           'n_freq': n_freq,\
+                          }
         self.velfunc = velocMLP(in_features, hidden_features, hidden_layers, out_features, sigmac, n_freq, tdiv)
     def save_state(self, fn='state.tar'):
-        torch.save(self.state_dict(), fn)
+        selfdict = self.state_dict()
+        selfdict['modelshape'] = self.modelshape
+        torch.save(selfdict, fn)
     def load_state(self, fn='state.tar'):
-        self.load_state_dict(torch.load(fn))
+        self_dict = torch.load(fn)
+        ms = self_dict.pop('modelshape')
+        self.velfunc = velocMLP(ms['in_features'], ms['hidden_features'], ms['hidden_layers'], ms['out_features'], 5, ms['n_freq'], 5)
+        
+        # pdb.set_trace()
+        self.load_state_dict(self_dict)
+        self=self.to(device)
+        
 #     def getGrads(self, zt):
 #         """
 #         zt: N (d+1)
