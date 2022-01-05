@@ -10,19 +10,20 @@ from geomloss import SamplesLoss
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 from Utils import InputMapping, BoundingBox, ImageDataset, SaveTrajectory, MiscTransforms, SaveTrajectory as st, SpecialLosses as sl
 from ODEModel import velocMLP, coordMLP, FfjordModel
+import os
 
-def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=FfjordModel(), save=False):
+def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=FfjordModel(), save=False, outname = 'results/outcache/'):
     z_target_full, __ = ImageDataset.normalize_samples(z_target_full) # normalize to fit in [0,1] box.
     my_loss_f = SamplesLoss("sinkhorn", p=2, blur=0.00001)
-
+    if save and not os.path.exists(outname):
+        os.makedirs(outname)
+        
     model.to(device)
     max_n_subsample = 1100; # more is too slow. 2000 is enough to get a reasonable capture of the image per iter.
     if n_subsample > max_n_subsample:
         n_subsample = max_n_subsample
     currlr = 1e-4;
-#     currlr = 1e-6;
     stepsperbatch=50
-#     optimizer = torch.optim.Adam(list(model.parameters()) + list(bmodel.parameters()), lr=currlr)
     optimizer = torch.optim.Adam(list(model.parameters()), lr=currlr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',factor=.5,patience=1,min_lr=1e-7)
     
@@ -137,7 +138,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         #         + KE.mean()*.00000 \
         #         + Forces.mean()*.0001
         regloss = 0 * div2loss.mean() \
-                + 0 * curl2loss.mean() \
+                - .00* torch.clamp(curl2loss.mean(), 0, 10) \
                 + 0 * rigid2loss.mean() \
                 + 0 * vgradloss.mean() \
                 + 0 * KEloss.mean() \
@@ -175,18 +176,16 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
             
             print('batch',batch,'loss',loss)
             f, (ax1, ax2) = plt.subplots(1, 2)
-            cols1 = ['blue','blue','blue','blue','blue','blue']
-            cols2 = ['green','green','green','green','green','green']
             z_t = model(z_target[0,:,:], integration_times = torch.linspace(0,T-1,T).to(device))
             for t in range(0,T):
-                ax1.scatter(z_t.cpu().detach().numpy()[t,:,0], z_t.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c=cols1[t], edgecolors='black')
-                ax1.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c=cols2[t], edgecolors='black')
+                ax1.scatter(z_t.cpu().detach().numpy()[t,:,0], z_t.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c='blue', edgecolors='black')
+                ax1.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c='green', edgecolors='black')
             ax1.axis('equal')
             
             z_t = model(z_target[T-1,:,:], integration_times = torch.linspace(T-1, 0, T).to(device))
             for t in range(0,T):
-                ax2.scatter(z_t.cpu().detach().numpy()[t,:,0], z_t.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c=cols1[t], edgecolors='black')
-                ax2.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c=cols2[t], edgecolors='black')
+                ax2.scatter(z_t.cpu().detach().numpy()[t,:,0], z_t.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c="blue", edgecolors='black')
+                ax2.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c="green", edgecolors='black')
             ax2.axis('equal')
             plt.show()
             
@@ -198,9 +197,9 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
             print('batch number',batch,'out of',n_iters)
             savetimebegin = time.time()
             if save and batch > 0:
-                model.save_state(fn='models/state_' + f"{batch:04}" + '.tar')
-                st.save_trajectory_vel(model, z_target[:,1:4000,:], "fit_" + f"{batch:04}", savedir='imgs', nsteps=10, memory=0.01, n=1000)
-                st.trajectory_to_video("fit_" + f"{batch:04}", savedir='imgs', mp4_fn='transform.mp4')
+                model.save_state(fn=outname + 'state_' + f"{batch:04}" + '.tar')
+                subsample_inds = torch.randperm(z_target.shape[1])[:4000];
+                st.save_trajectory(model, z_target[:,subsample_inds,:], savedir=outname+"fit_" + f"{batch:04}" + "/", nsteps=10)
             print('savetime',time.time()-savetimebegin)
         
         fitloss.detach();
@@ -210,6 +209,8 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         del loss;
         torch.cuda.empty_cache()
     if save:
-        model.save_state(fn='models/state_end.tar')
+        model.save_state(fn=outname + 'state_end.tar')
+        subsample_inds = torch.randperm(z_target.shape[1])[:4000];
+        st.save_trajectory(model, z_target[:,subsample_inds,:], savedir=outname, nsteps=40, dpiv=400)
     return model, losses, separate_losses, lrs, n_subs
 
