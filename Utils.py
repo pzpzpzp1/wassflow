@@ -298,8 +298,7 @@ class SaveTrajectory():
                     plt.axis('equal')
                     moviewriter.grab_frame()
                     plt.clf()
-                    
-                moviewriter.finish()
+            moviewriter.finish()
         
         plt.close(fig)
             

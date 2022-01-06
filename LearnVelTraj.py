@@ -88,25 +88,6 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         # tzu = BB.samplerandom(N = 3000, bbscale = 1.1);
         # z_dots, zt_jacs, accels = model.velfunc.getGrads(tzu);
         
-#         dim = zt_grad0.shape[1]
-#         jac = zt_grad0[:,0:dim,0:dim];
-#         Mnoninversionloss = sl.jacdetloss(jac);
-#         separate_losses[4,batch] = Mnoninversionloss.mean().item()
-#         KE = (torch.norm(zt_grad0[:,:,dim],p=2,dim=1)**2);
-#         separate_losses[5,batch] = KE.mean().item()
-#         Forces = (torch.norm(accel,p=2,dim=1)**2);
-#         separate_losses[6,batch] = Forces.mean().item()
-        
-#         z_sample = BB.samplerandom(N = 2000, bbscale = 1.1); 
-#         z_sample = BoundingBox.samplecustom(N = 10); 
-# #         pdb.set_trace()
-#         z_dots, zt_grad, __ = model.getGrads(z_sample); dim = zt_grad.shape[1]
-#         jac = zt_grad[:,0:dim,0:dim];
-#         noninversionloss = sl.jacdetloss(jac);
-#         separate_losses[2,batch] = noninversionloss.mean().item()
-#         veloc_norms_2 = (torch.norm(zt_grad[:,:,dim],p=2,dim=1)**2);
-#         separate_losses[3,batch] = veloc_norms_2.mean().item()
-        
         # pdb.set_trace()
         # divergence squared
         div2loss = (zt_jacs[:,0,0]+zt_jacs[:,1,1])**2
@@ -143,7 +124,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
                 + 0 * rigid2loss.mean() \
                 + 0 * vgradloss.mean() \
                 + 0 * KEloss.mean() \
-                + 0 * Aloss.mean() 
+                + .01 * Aloss.mean() 
 #         - 1*torch.clamp(vgradloss.mean(), max = 10**10)  # make high noise velocity field
 #         - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
         reglosstime = time.time()-cpt
