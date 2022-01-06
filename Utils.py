@@ -1,5 +1,5 @@
 import math
-import numpy as np
+import numpy as np, math, gc
 from IPython.display import clear_output
 import pdb
 import time
@@ -8,14 +8,13 @@ import matplotlib
 import matplotlib.animation
 import torch
 import torchvision
-import torch.nn as nn
-from torch import Tensor
+from torch import Tensor, nn
 from torch.nn  import functional as F 
 from torch.autograd import Variable
 from torchdiffeq import odeint_adjoint as odeint
-# from torch.distributions import MultivariateNormal
+from torch.distributions import MultivariateNormal
 use_cuda = torch.cuda.is_available()
-#from geomloss import SamplesLoss
+from geomloss import SamplesLoss
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 #import gc
 import os
@@ -219,12 +218,14 @@ class SaveTrajectory():
         
         T = z_target.shape[0]
         integration_times = torch.linspace(0,T-1,nsteps).to(device);
-        x_traj_reverse = model(z_target[T-1,:,:], integration_times, reverse=True).cpu().detach().numpy()
-        x_traj_forward = model(z_target[0,:,:], integration_times, reverse=False).cpu().detach().numpy()
+        x_traj_reverse_t = model(z_target[T-1,:,:], integration_times, reverse=True)
+        x_traj_forward_t = model(z_target[0,:,:], integration_times, reverse=False)
+        x_traj_reverse = x_traj_reverse_t.cpu().detach().numpy()
+        x_traj_forward = x_traj_forward_t.cpu().detach().numpy()
         
         # forward
         moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
-        fig = plt.figure()
+        fig = plt.figure(); 
         with moviewriter.saving(fig, savedir+'forward_'+savename+'.mp4', dpiv):
             for i in range(nsteps):
                 for t in range(T):
@@ -235,7 +236,7 @@ class SaveTrajectory():
                 z_dots_d = model.velfunc.get_z_dot(z_sample[:,0]*0.0 + integration_times[i], z_sample[:,1:]).cpu().detach().numpy();
                 plt.quiver(z_sample_d[:,1], z_sample_d[:,2], z_dots_d[:,0], z_dots_d[:,1])
                 plt.scatter(x_traj[i,:,0], x_traj[i,:,1], s=10, alpha=.5, linewidths=0, c='blue', edgecolors='black')
-
+                
                 plt.axis('equal')
                 moviewriter.grab_frame()
                 plt.clf()
@@ -250,16 +251,49 @@ class SaveTrajectory():
                 x_traj = x_traj_reverse
 
                 # plot velocities
-                z_dots_d = model.velfunc.get_z_dot(z_sample[:,0]*0.0 + integration_times[(T-1)-i], z_sample[:,1:]).cpu().detach().numpy();
+                z_dots_d = model.velfunc.get_z_dot(z_sample[:,0]*0.0 + integration_times[(nsteps-1)-i], z_sample[:,1:]).cpu().detach().numpy();
                 plt.quiver(z_sample_d[:,1], z_sample_d[:,2], -z_dots_d[:,0], -z_dots_d[:,1])
                 plt.scatter(x_traj[i,:,0], x_traj[i,:,1], s=10, alpha=.5, linewidths=0, c='blue', edgecolors='black')
-
+                
                 plt.axis('equal')
                 moviewriter.grab_frame()
                 plt.clf()
             moviewriter.finish()
-            plt.close(fig)
+            
+        # forward and back
+        ts = torch.linspace(0,1,nsteps)
+        moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
+        with moviewriter.saving(fig, savedir+'forback_'+savename+'.mp4', dpiv):
+            for i in range(nsteps):
+                fs = x_traj_forward_t[i,:,:]
+                ft = x_traj_reverse_t[(nsteps-1)-i,:,:]
+                
+                # ground truth keyframes
+                for t in range(T):
+                    plt.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c='green', edgecolors='black')
+                
+                # forward and backwards separately
+                fsp = fs.cpu().detach().numpy()
+                ftp = ft.cpu().detach().numpy()
+                plt.scatter(fsp[:,0], fsp[:,1], s=10, alpha=.5, linewidths=0, c='yellow', edgecolors='black')
+                plt.scatter(ftp[:,0], ftp[:,1], s=10, alpha=.5, linewidths=0, c='orange', edgecolors='black')
+                
+                # plot velocities
+                z_dots_d = model.velfunc.get_z_dot(z_sample[:,0]*0.0 + integration_times[i], z_sample[:,1:]).cpu().detach().numpy()
+                plt.quiver(z_sample_d[:,1], z_sample_d[:,2], z_dots_d[:,0], z_dots_d[:,1])
+                
+                # W2 barycenter combination
+                fst = MiscTransforms.OT_registration(fs.detach(), ft.detach())
+                x_traj = (fs*(1-ts[i]) + fst*ts[i]).cpu().detach().numpy()
+                plt.scatter(x_traj[:,0], x_traj[:,1], s=10, alpha=.5, linewidths=0, c='blue', edgecolors='black')
+                
+                plt.axis('equal')
+                moviewriter.grab_frame()
+                plt.clf()
+            moviewriter.finish()
         
+        plt.close(fig)
+            
 class MiscTransforms():
     def z_t_to_zt(z, t):
         """
@@ -272,6 +306,27 @@ class MiscTransforms():
         zz = torch.tile(z,(t.shape[0],1))
         tt = t.repeat_interleave(z.shape[0]).reshape((-1,1))
         zt = torch.cat((zz,tt),dim=1)
-        
-#         pdb.set_trace()
         return zt
+
+    def OT_registration(source, target):
+        Loss = SamplesLoss("sinkhorn", p=2, blur=0.00001)
+        x = source
+        y = target
+        a = source[:,0]*0.0 + 1.0/source.shape[0]
+        b = target[:,0]*0.0 + 1.0/target.shape[0]
+
+        x.requires_grad = True
+        z = x.clone()  # Moving point cloud
+
+        if use_cuda:
+            torch.cuda.synchronize()
+        start = time.time()
+
+        nits = 10
+        for it in range(nits):
+            # wasserstein_zy = Loss(a, z, b, y)
+            wasserstein_zy = Loss(z, y)
+            [grad_z] = torch.autograd.grad(wasserstein_zy, [z])
+            z -= grad_z / a[:, None]  # Apply the regularized Brenier map
+        end = time.time()
+        return z
