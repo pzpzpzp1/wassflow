@@ -9,12 +9,12 @@ use_cuda = torch.cuda.is_available()
 from geomloss import SamplesLoss
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 from Utils import InputMapping, BoundingBox, ImageDataset, SaveTrajectory, MiscTransforms, SaveTrajectory as st, SpecialLosses as sl
-from ODEModel import velocMLP, coordMLP, FfjordModel
+from ODEModel import velocMLP, FfjordModel
 import os
 from tqdm import tqdm
 # import tensorflow as tf
 
-def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=FfjordModel(), outname = 'results/outcache/', visualize=False):
+def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=FfjordModel(), outname = 'results/outcache/', visualize=False, sqrtfitloss=False):
     z_target_full, __ = ImageDataset.normalize_samples(z_target_full) # normalize to fit in [0,1] box.
     my_loss_f = SamplesLoss("sinkhorn", p=2, blur=0.00001)
     if not os.path.exists(outname):
@@ -115,23 +115,18 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
 #         timeIndices = (z_sample[:,0] < ((T-1.)/.001)).detach()
         
         # combine energies
-#         regloss = veloc_norms_2.mean()*1
-        # regloss = noninversionloss.mean()*0 \
-        #         + veloc_norms_2.mean()*0 \
-        #         + Mnoninversionloss.mean()*0 \
-        #         + KE.mean()*.00000 \
-        #         + Forces.mean()*.0001
         regloss = 0 * div2loss.mean() \
                 - .00* torch.clamp(curl2loss.mean(), 0, 10) \
                 + 0 * rigid2loss.mean() \
                 + 0 * vgradloss.mean() \
                 + 0 * KEloss.mean() \
-                + .05 * Aloss.mean() 
-#         - 1*torch.clamp(vgradloss.mean(), max = 10**10)  # make high noise velocity field
+                + .1 * Aloss.mean() \
+                + 0 * vgradloss.mean() 
 #         - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
         reglosstime = time.time()-cpt
     
         loss = fitloss + fitlossb; 
+        loss = torch.sqrt(loss) if sqrtfitloss else loss
         totalloss = loss + regloss
         losses.append(totalloss.item())
         n_subs.append(n_subsample)
