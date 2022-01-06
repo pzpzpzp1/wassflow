@@ -33,6 +33,8 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
     BB = BoundingBox(z_target_full);
     
     separate_losses = np.empty((8, n_iters))
+    separate_times = np.empty((4, n_iters))
+    savetime = 0
     losses = []
     lrs=[]
     n_subs=[]
@@ -124,19 +126,21 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
                 + 0 * rigid2loss.mean() \
                 + 0 * vgradloss.mean() \
                 + 0 * KEloss.mean() \
-                + .01 * Aloss.mean() 
+                + .05 * Aloss.mean() 
 #         - 1*torch.clamp(vgradloss.mean(), max = 10**10)  # make high noise velocity field
 #         - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
         reglosstime = time.time()-cpt
-#         pdb.set_trace()
+    
         loss = fitloss + fitlossb; 
         totalloss = loss + regloss
         losses.append(totalloss.item())
         n_subs.append(n_subsample)
         lrs.append(currlr)
         
+        cpt = time.time()
         totalloss.backward()
         optimizer.step()
+        steptime = time.time()-cpt
         
         if (batch>1 and batch % 50 == 0):
             # increase n_subsample by factor. note this does decrease wasserstein loss because sampling is a biased estimator.
@@ -170,27 +174,42 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
             
             ptime = time.time()-start
             
-            savetimebegin = time.time()
+            cpt = time.time()
             if batch > 0:
                 st.save_trajectory(model, z_target, savedir=outname, savename=f"{batch:04}", nsteps=10, n=4000, dpiv=200)
-            savetime = time.time()-savetimebegin
+            savetime = time.time()-cpt
             
             # print summary stats
             st.gpu_usage()
-            print('(loss:',f"{loss.item():.4f})",'(lr:',f"{currlr})", '(n_subsample:', f"{n_subsample})",'\n(time elapsed:',f"{ptime:.4f})",'(total time:',f"{(time.time()-start0):.4f})",'(fit time:',f"{fitlosstime:.4f})",'(reg loss time:',f"{reglosstime:.4f})",'(savetime:',f"{savetime:.4f})")
+            print('(loss:',f"{loss.item():.4f})",'(lr:',f"{currlr})", '(n_subsample:', f"{n_subsample})",'\n(time elapsed:',f"{ptime:.4f})",'(total time:',f"{(time.time()-start0):.4f})",'(fit time:',f"{fitlosstime:.4f})",'(reg loss time:',f"{reglosstime:.4f})",'(savetime:',f"{savetime:.4f})",'(steptime:',f"{steptime:.4f})")
 
+        separate_times[0,batch] = fitlosstime
+        separate_times[1,batch] = reglosstime
+        separate_times[2,batch] = steptime
+        separate_times[3,batch] = savetime
+            
     st.save_trajectory(model, z_target_full, savedir=outname, savename='final', nsteps=40, dpiv=400, n=1500)
     
     # save stats
-    (fig,(ax1,ax2,ax3))=plt.subplots(3,1)
+    (fig,(ax1,ax2,ax3,ax4,ax5))=plt.subplots(5,1)
     ax1.plot(n_subs,'r'); ax1.set_ylabel('n_sub')
     ax2.plot(lrs,'g'); ax2.set_ylabel('lr') 
     ax3.plot(losses,'b'); ax3.set_ylabel('loss') 
+    ax4.plot(separate_times[0,:],'r'); 
+    ax4.plot(separate_times[1,:],'g'); 
+    ax4.plot(separate_times[2,:],'b'); ax4.set_ylabel('runtimes') 
+    ax5.plot(separate_times[3,:],'r'); ax5.set_ylabel('savetimes') 
     plt.savefig(outname + "stats.pdf"); 
     plt.close(fig)
     
     # save summary data:
-    # file = open(outname + "summary.txt","w")
+    summarydata = {'losses': losses, \
+                   'separate_losses': separate_losses,\
+                   'lrs': lrs,\
+                   'n_subs': n_subs,\
+                   'separate_times': separate_times\
+                  }
+    torch.save(summarydata, outname + "summary.tar")
     
-    return model, losses, separate_losses, lrs, n_subs
+    return model, losses, separate_losses, lrs, n_subs, separate_times
 

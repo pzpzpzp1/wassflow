@@ -178,7 +178,7 @@ class FfjordModel(torch.nn.Module):
                            'n_freq': n_freq,\
                           }
         self.velfunc = velocMLP(in_features, hidden_features, hidden_layers, out_features, sigmac, n_freq, tdiv)
-    def save_state(self, fn='state.tar'):
+    def save_state(self, fn='results/outcache/models/state.tar'):
         selfdict = self.state_dict()
         selfdict['modelshape'] = self.modelshape
         torch.save(selfdict, fn)
