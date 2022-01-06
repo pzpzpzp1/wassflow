@@ -145,10 +145,10 @@ class BoundingBox():
         yspace = torch.linspace(eLL[1], eTR[1], y_N);
         if self.dim == 3:
             zspace = torch.linspace(eLL[2], eTR[2], z_N);
-            xgrid,ygrid,zgrid,tgrid=torch.meshgrid(xspace,yspace,zspace,tspace);
+            xgrid,ygrid,zgrid,tgrid=torch.meshgrid(xspace,yspace,zspace,tspace,indexing='ij');
             z_sample = torch.transpose(torch.reshape(torch.stack([tgrid,xgrid,ygrid,zgrid]),(4,-1)),0,1).to(device);
         else:
-            xgrid,ygrid,tgrid=torch.meshgrid(xspace,yspace,tspace);
+            xgrid,ygrid,tgrid=torch.meshgrid(xspace,yspace,tspace,indexing='ij');
             z_sample = torch.transpose(torch.reshape(torch.stack([tgrid,xgrid,ygrid]),(3,-1)),0,1).to(device);
         
         return z_sample.to(device)
@@ -264,33 +264,42 @@ class SaveTrajectory():
         ts = torch.linspace(0,1,nsteps)
         moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
         with moviewriter.saving(fig, savedir+'forback_'+savename+'.mp4', dpiv):
-            for i in range(nsteps):
-                fs = x_traj_forward_t[i,:,:]
-                ft = x_traj_reverse_t[(nsteps-1)-i,:,:]
-                
-                # ground truth keyframes
-                for t in range(T):
-                    plt.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c='green', edgecolors='black')
-                
-                # forward and backwards separately
-                fsp = fs.cpu().detach().numpy()
-                ftp = ft.cpu().detach().numpy()
-                plt.scatter(fsp[:,0], fsp[:,1], s=10, alpha=.5, linewidths=0, c='yellow', edgecolors='black')
-                plt.scatter(ftp[:,0], ftp[:,1], s=10, alpha=.5, linewidths=0, c='orange', edgecolors='black')
-                
-                # plot velocities
-                z_dots_d = model.velfunc.get_z_dot(z_sample[:,0]*0.0 + integration_times[i], z_sample[:,1:]).cpu().detach().numpy()
-                plt.quiver(z_sample_d[:,1], z_sample_d[:,2], z_dots_d[:,0], z_dots_d[:,1])
-                
-                # W2 barycenter combination
-                fst = MiscTransforms.OT_registration(fs.detach(), ft.detach())
-                x_traj = (fs*(1-ts[i]) + fst*ts[i]).cpu().detach().numpy()
-                plt.scatter(x_traj[:,0], x_traj[:,1], s=10, alpha=.5, linewidths=0, c='blue', edgecolors='black')
-                
-                plt.axis('equal')
-                moviewriter.grab_frame()
-                plt.clf()
-            moviewriter.finish()
+            for tt in range(T-1):
+                integration_times = torch.linspace(tt,tt+1,nsteps).to(device);
+                x_traj_reverse_t = model(z_target[tt+1,:,:], integration_times, reverse=True)
+                x_traj_forward_t = model(z_target[tt,:,:], integration_times, reverse=False)
+                x_traj_reverse = x_traj_reverse_t.cpu().detach().numpy()
+                x_traj_forward = x_traj_forward_t.cpu().detach().numpy()
+
+                endstep = nsteps if tt==T-2 else nsteps-1
+                for i in range(endstep):
+                    fs = x_traj_forward_t[i,:,:]
+                    ft = x_traj_reverse_t[(nsteps-1)-i,:,:]
+
+                    # ground truth keyframes
+                    for t in range(T):
+                        plt.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c='green', edgecolors='black')
+
+                    # forward and backwards separately
+                    fsp = fs.cpu().detach().numpy()
+                    ftp = ft.cpu().detach().numpy()
+                    plt.scatter(fsp[:,0], fsp[:,1], s=10, alpha=.5, linewidths=0, c='yellow', edgecolors='black')
+                    plt.scatter(ftp[:,0], ftp[:,1], s=10, alpha=.5, linewidths=0, c='orange', edgecolors='black')
+
+                    # plot velocities
+                    z_dots_d = model.velfunc.get_z_dot(z_sample[:,0]*0.0 + integration_times[i], z_sample[:,1:]).cpu().detach().numpy()
+                    plt.quiver(z_sample_d[:,1], z_sample_d[:,2], z_dots_d[:,0], z_dots_d[:,1])
+
+                    # W2 barycenter combination
+                    fst = MiscTransforms.OT_registration(fs.detach(), ft.detach())
+                    x_traj = (fs*(1-ts[i]) + fst*ts[i]).cpu().detach().numpy()
+                    plt.scatter(x_traj[:,0], x_traj[:,1], s=10, alpha=.5, linewidths=0, c='blue', edgecolors='black')
+
+                    plt.axis('equal')
+                    moviewriter.grab_frame()
+                    plt.clf()
+                    
+                moviewriter.finish()
         
         plt.close(fig)
             

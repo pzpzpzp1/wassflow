@@ -283,7 +283,7 @@ class coordMLP(nn.Module):
     def showmap(self, t=0, bound=1.1,N=40, ti=1,ax=plt):
         dx = 2*bound/(N-1)
         xvals = torch.linspace(-bound,bound,N)
-        X, Y = torch.meshgrid(xvals, xvals)
+        X, Y = torch.meshgrid(xvals, xvals,indexing='ij')
         Xc = X[:-1,:-1] + dx/2
         Yc = Y[:-1,:-1] + dx/2
         z = torch.sqrt((Xc-Xc.round())**2 + (Yc-Yc.round())**2)

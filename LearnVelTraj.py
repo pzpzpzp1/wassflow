@@ -191,14 +191,14 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
             
             savetimebegin = time.time()
             if batch > 0:
-                st.save_trajectory(model, z_target, savedir=outname, savename=f"{batch:04}", nsteps=10, n=4000)
+                st.save_trajectory(model, z_target, savedir=outname, savename=f"{batch:04}", nsteps=10, n=4000, dpiv=200)
             savetime = time.time()-savetimebegin
             
             # print summary stats
             st.gpu_usage()
             print('(loss:',f"{loss.item():.4f})",'(lr:',f"{currlr})", '(n_subsample:', f"{n_subsample})",'\n(time elapsed:',f"{ptime:.4f})",'(total time:',f"{(time.time()-start0):.4f})",'(fit time:',f"{fitlosstime:.4f})",'(reg loss time:',f"{reglosstime:.4f})",'(savetime:',f"{savetime:.4f})")
 
-    st.save_trajectory(model, z_target, savedir=outname, savename='final', nsteps=40, dpiv=400, n=4000)
+    st.save_trajectory(model, z_target_full, savedir=outname, savename='final', nsteps=40, dpiv=400, n=1500)
     
     # save stats
     (fig,(ax1,ax2,ax3))=plt.subplots(3,1)
