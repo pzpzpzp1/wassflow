@@ -32,7 +32,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
     T = z_target_full.shape[0];
     BB = BoundingBox(z_target_full);
     
-    separate_losses = np.empty((8, n_iters))
+    separate_losses = np.empty((11, n_iters))
     separate_times = np.empty((4, n_iters))
     savetime = 0
     losses = []
@@ -78,31 +78,44 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         separate_losses[1,batch] = fitlossb
         fitlosstime = time.time()-cpt
         
-        # VELOCITY REGULARIZERS loss
         cpt = time.time();
+        ## MASS BASED VELOCITY REGULARIZERS
         fbt = torch.cat((torch.rand(15).to(device)*(T-1.), torch.zeros(1).to(device)),0).sort()[0]
         subsample_inds = torch.randperm(fullshape[1])[:200];
         z_t = model(z_target_full[0,subsample_inds,:], integration_times = fbt).detach()[1:,:,:];
         zz = z_t.reshape(z_t.shape[0]*z_t.shape[1], z_t.shape[2])
         tt = fbt[1:].repeat_interleave(z_t.shape[1]).reshape((-1,1))
         tzm = torch.cat((tt,zz),1)
-        z_dots, zt_jacs, zt_accel = model.velfunc.getGrads(tzm);
-        # tzu = BB.samplerandom(N = 3000, bbscale = 1.1);
-        # z_dots, zt_jacs, accels = model.velfunc.getGrads(tzu);
+        z_dots, z_jacs, z_accel = model.velfunc.getGrads(tzm);
+        n_points = z_dots.shape[0]
         
-        # pdb.set_trace()
         # divergence squared
-        div2loss = (zt_jacs[:,0,0]+zt_jacs[:,1,1])**2
+        div2loss = (z_jacs[:,0,0]+z_jacs[:,1,1])**2
         # square norm of curl
-        curl2loss = (zt_jacs[:,0,1]-zt_jacs[:,1,0])**2
+        curl2loss = (z_jacs[:,0,1]-z_jacs[:,1,0])**2
         # rigid motion: x(t) -> e^[wt] x0 + kt. v = x_dot = [w]x0+k; dvdx = [w]. ==> skew symmetric velocity gradient is rigid.
-        rigid2loss = ((zt_jacs[:,0,1]+zt_jacs[:,1,0])**2)/2 + (zt_jacs[:,0,0])**2 + (zt_jacs[:,1,1])**2 
+        # if J is displacement gradient, F=J+I is the deformation gradient, then F'F-I is the green strain. Linearizing this with small J results in J+J'
+        rigid2loss = ((z_jacs[:,0,1]+z_jacs[:,1,0])**2)/2 + (z_jacs[:,0,0])**2 + (z_jacs[:,1,1])**2 
         # v-field gradient loss
-        vgradloss = zt_jacs[:,0,0]**2 + zt_jacs[:,1,1]**2+zt_jacs[:,0,1]**2 + zt_jacs[:,1,0]**2
+        vgradloss = z_jacs[:,0,0]**2 + z_jacs[:,1,1]**2+z_jacs[:,0,1]**2 + z_jacs[:,1,0]**2
         # kinetic energy loss
         KEloss = z_dots[:,0]**2 + z_dots[:,1]**2
         # accel loss
-        Aloss = zt_accel[:,0]**2 + zt_accel[:,1]**2
+        Aloss = z_accel[:,0]**2 + z_accel[:,1]**2
+        # self advection loss
+        selfadvect = (torch.bmm(z_jacs, z_dots.reshape((n_points,fullshape[2],1))) + z_accel)
+        selfadvectloss = selfadvect[:,0]**2 + selfadvect[:,1]**2
+        
+        ## UNIFORM SPACETIME VELOCITY REGULARIZERS
+        tzu = BB.samplerandom(N = 3000, bbscale = 1.1);
+        z_dots_u, z_jacs_u, z_accel_u = model.velfunc.getGrads(tzu);
+        n_points_u = z_dots_u.shape[0]
+        
+        # global self advection loss
+        selfadvect_u = (torch.bmm(z_jacs_u, z_dots_u.reshape((n_points_u,fullshape[2],1))) + z_accel_u)
+        u_selfadvectloss = selfadvect_u[:,0]**2 + selfadvect_u[:,1]**2
+        # divergence squared
+        u_div2loss = (z_jacs_u[:,0,0]+z_jacs_u[:,1,1])**2        
         
         separate_losses[2,batch] = div2loss.mean().item()
         separate_losses[3,batch] = curl2loss.mean().item()
@@ -110,18 +123,23 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         separate_losses[5,batch] = vgradloss.mean().item()
         separate_losses[6,batch] = KEloss.mean().item()
         separate_losses[7,batch] = Aloss.mean().item()
-        
-#         timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
-#         timeIndices = (z_sample[:,0] < ((T-1.)/.001)).detach()
+        separate_losses[8,batch] = selfadvectloss.mean().item()
+        separate_losses[9,batch] = u_selfadvectloss.mean().item()
+        separate_losses[10,batch] = u_div2loss.mean().item()
         
         # combine energies
+#         timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
+#         timeIndices = (z_sample[:,0] < ((T-1.)/.001)).detach()
         regloss = 0 * div2loss.mean() \
-                - .00* torch.clamp(curl2loss.mean(), 0, 10) \
+                - 1* torch.clamp(curl2loss.mean(), 0, 5) \
                 + 0 * rigid2loss.mean() \
                 + 0 * vgradloss.mean() \
                 + 0 * KEloss.mean() \
-                + .1 * Aloss.mean() \
-                + 0 * vgradloss.mean() 
+                + .00125 * Aloss.mean() \
+                + 0 * vgradloss.mean() \
+                + .025 * selfadvectloss.mean() \
+                + 0 * u_selfadvectloss.mean() \
+                + .025 * u_div2loss.mean() 
 #         - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
         reglosstime = time.time()-cpt
     
