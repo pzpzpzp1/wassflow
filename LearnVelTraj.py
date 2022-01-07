@@ -82,7 +82,8 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         ## MASS BASED VELOCITY REGULARIZERS
         fbt = torch.cat((torch.rand(15).to(device)*(T-1.), torch.zeros(1).to(device)),0).sort()[0]
         subsample_inds = torch.randperm(fullshape[1])[:200];
-        z_t = model(z_target_full[0,subsample_inds,:], integration_times = fbt).detach()[1:,:,:];
+        # z_t = model(z_target_full[0,subsample_inds,:], integration_times = fbt).detach()[1:,:,:]; # error. can't require grad of nonleaf variable. is it ok if i just don't require grad and then diff w.r.t. it anyway?
+        z_t = model(z_target_full[0,subsample_inds,:], integration_times = fbt)[1:,:,:];
         zz = z_t.reshape(z_t.shape[0]*z_t.shape[1], z_t.shape[2])
         tt = fbt[1:].repeat_interleave(z_t.shape[1]).reshape((-1,1))
         tzm = torch.cat((tt,zz),1)
@@ -131,7 +132,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
 #         timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
 #         timeIndices = (z_sample[:,0] < ((T-1.)/.001)).detach()
         regloss = 0 * div2loss.mean() \
-                - 1* torch.clamp(curl2loss.mean(), 0, 5) \
+                - 2* torch.clamp(curl2loss.mean(), 0, 3) \
                 + 0 * rigid2loss.mean() \
                 + 0 * vgradloss.mean() \
                 + 0 * KEloss.mean() \
