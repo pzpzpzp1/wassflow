@@ -57,7 +57,6 @@ class velocMLP(nn.Module):
         out: N d
         jacs: 
         """
-        # tz.requires_grad = True
         tz.requires_grad_(True)
         dv = tz.shape[1]-1;
         batchsize = tz.shape[0];

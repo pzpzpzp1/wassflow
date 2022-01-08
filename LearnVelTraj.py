@@ -25,7 +25,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
     if n_subsample > max_n_subsample:
         n_subsample = max_n_subsample
     currlr = 1e-4;
-    stepsperbatch=50
+    stepsperbatch=20
     optimizer = torch.optim.Adam(list(model.parameters()), lr=currlr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',factor=.5,patience=1,min_lr=1e-7)
     
@@ -57,8 +57,8 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         
         optimizer.zero_grad()
         ## FORWARD and BACKWARD fitting loss
-        # integrate ODE forward in time
         cpt = time.time();
+        # integrate ODE forward in time
         fitloss = torch.tensor(0.).to(device)
         for t in range(0,T-1):
             z_t = model(z_target[t,:,:], integration_times = torch.linspace(t,t+1,2).to(device))
@@ -68,6 +68,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         for t in range(0,T-1):
             z_t_b = model(z_target[(T-1)-t,:,:], integration_times = torch.linspace((T-1)-t,(T-1)-t-1,2).to(device))
             fitlossb += my_loss_f(z_target[(T-1)-t-1,:,:], z_t_b[1,:,:])
+            
         if batch==0:
             # scaling factor chosen at start to normalize fitting loss
             fitloss0 = fitloss.item(); # constant. not differentiated through
@@ -80,13 +81,20 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         
         cpt = time.time();
         ## MASS BASED VELOCITY REGULARIZERS
-        fbt = torch.cat((torch.rand(15).to(device)*(T-1.), torch.zeros(1).to(device)),0).sort()[0]
-        subsample_inds = torch.randperm(fullshape[1])[:200];
-        # z_t = model(z_target_full[0,subsample_inds,:], integration_times = fbt).detach()[1:,:,:]; # error. can't require grad of nonleaf variable. is it ok if i just don't require grad and then diff w.r.t. it anyway?
-        z_t = model(z_target_full[0,subsample_inds,:], integration_times = fbt)[1:,:,:];
-        zz = z_t.reshape(z_t.shape[0]*z_t.shape[1], z_t.shape[2])
-        tt = fbt[1:].repeat_interleave(z_t.shape[1]).reshape((-1,1))
-        tzm = torch.cat((tt,zz),1)
+        fbt = torch.cat((torch.rand(10).to(device), torch.zeros(1).to(device)),0).sort()[0]
+        tzm = torch.zeros(0,3).to(device)
+        for i in range(T-1):
+            subsample_inds = torch.randperm(fullshape[1])[:100];
+            # forward
+            z_t = model(z_target_full[i,subsample_inds,:], integration_times = i + fbt)[1:,:,:];
+            zz = z_t.reshape(z_t.shape[0]*z_t.shape[1], z_t.shape[2])
+            tt = fbt[1:].repeat_interleave(z_t.shape[1]).reshape((-1,1))
+            tzm = torch.cat((tzm,torch.cat((tt,zz),1)),0)
+            # backward
+            z_t = model(z_target_full[i+1,subsample_inds,:], integration_times = (i + 1) - fbt)[1:,:,:];
+            zz = z_t.reshape(z_t.shape[0]*z_t.shape[1], z_t.shape[2])
+            tt = fbt[1:].repeat_interleave(z_t.shape[1]).reshape((-1,1))
+            tzm = torch.cat((tzm, torch.cat((tt,zz),1)),0)
         z_dots, z_jacs, z_accel = model.velfunc.getGrads(tzm);
         n_points = z_dots.shape[0]
         
@@ -132,7 +140,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
 #         timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
 #         timeIndices = (z_sample[:,0] < ((T-1.)/.001)).detach()
         regloss = 0 * div2loss.mean() \
-                - 2* torch.clamp(curl2loss.mean(), 0, 3) \
+                - 0* torch.clamp(curl2loss.mean(), 0, 3) \
                 + 0 * rigid2loss.mean() \
                 + 0 * vgradloss.mean() \
                 + 0 * KEloss.mean() \
@@ -190,7 +198,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
             
             cpt = time.time()
             if batch > 0:
-                st.save_trajectory(model, z_target, savedir=outname, savename=f"{batch:04}", nsteps=10, n=4000, dpiv=200)
+                st.save_trajectory(model, z_target_full, savedir=outname, savename=f"{batch:04}", nsteps=15, n=400, dpiv=400)
             savetime = time.time()-cpt
             
             # print summary stats
