@@ -81,10 +81,10 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         
         cpt = time.time();
         ## MASS BASED VELOCITY REGULARIZERS
-        fbt = torch.cat((torch.rand(10).to(device), torch.zeros(1).to(device)),0).sort()[0]
+        fbt = torch.cat((torch.rand(5).to(device), torch.zeros(1).to(device)),0).sort()[0]
         tzm = torch.zeros(0,3).to(device)
         for i in range(T-1):
-            subsample_inds = torch.randperm(fullshape[1])[:100];
+            subsample_inds = torch.randperm(fullshape[1])[:200];
             # forward
             z_t = model(z_target_full[i,subsample_inds,:], integration_times = i + fbt)[1:,:,:];
             zz = z_t.reshape(z_t.shape[0]*z_t.shape[1], z_t.shape[2])
@@ -97,6 +97,18 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
             tzm = torch.cat((tzm, torch.cat((tt,zz),1)),0)
         z_dots, z_jacs, z_accel = model.velfunc.getGrads(tzm);
         n_points = z_dots.shape[0]
+        
+        
+        # fbt = torch.cat((torch.rand(20).to(device)*(T-1), torch.zeros(1).to(device)),0).sort()[0]
+        # subsample_inds = torch.randperm(fullshape[1])[:200];
+        # # forward
+        # z_t = model(z_target_full[0,subsample_inds,:], integration_times = fbt)[1:,:,:];
+        # zz = z_t.reshape(z_t.shape[0]*z_t.shape[1], z_t.shape[2])
+        # tt = fbt[1:].repeat_interleave(z_t.shape[1]).reshape((-1,1))
+        # tzm = torch.cat((tt,zz),1)
+        # z_dots, z_jacs, z_accel = model.velfunc.getGrads(tzm);
+        # n_points = z_dots.shape[0]
+        
         
         # divergence squared
         div2loss = (z_jacs[:,0,0]+z_jacs[:,1,1])**2
@@ -198,7 +210,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
             
             cpt = time.time()
             if batch > 0:
-                st.save_trajectory(model, z_target_full, savedir=outname, savename=f"{batch:04}", nsteps=15, n=400, dpiv=400)
+                st.save_trajectory(model, z_target_full, savedir=outname, savename=f"{batch:04}", nsteps=14, n=300, dpiv=400)
             savetime = time.time()-cpt
             
             # print summary stats
