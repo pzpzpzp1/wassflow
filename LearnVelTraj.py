@@ -25,14 +25,14 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
     if n_subsample > max_n_subsample:
         n_subsample = max_n_subsample
     currlr = 1e-4;
-    stepsperbatch=20
+    stepsperbatch=50
     optimizer = torch.optim.Adam(list(model.parameters()), lr=currlr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',factor=.5,patience=1,min_lr=1e-7)
     
     T = z_target_full.shape[0];
     BB = BoundingBox(z_target_full);
     
-    separate_losses = np.empty((11, n_iters))
+    separate_losses = np.empty((13, n_iters))
     separate_times = np.empty((4, n_iters))
     savetime = 0
     losses = []
@@ -98,18 +98,6 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         z_dots, z_jacs, z_accel = model.velfunc.getGrads(tzm);
         n_points = z_dots.shape[0]
         
-        
-        # fbt = torch.cat((torch.rand(20).to(device)*(T-1), torch.zeros(1).to(device)),0).sort()[0]
-        # subsample_inds = torch.randperm(fullshape[1])[:200];
-        # # forward
-        # z_t = model(z_target_full[0,subsample_inds,:], integration_times = fbt)[1:,:,:];
-        # zz = z_t.reshape(z_t.shape[0]*z_t.shape[1], z_t.shape[2])
-        # tt = fbt[1:].repeat_interleave(z_t.shape[1]).reshape((-1,1))
-        # tzm = torch.cat((tt,zz),1)
-        # z_dots, z_jacs, z_accel = model.velfunc.getGrads(tzm);
-        # n_points = z_dots.shape[0]
-        
-        
         # divergence squared
         div2loss = (z_jacs[:,0,0]+z_jacs[:,1,1])**2
         # square norm of curl
@@ -123,10 +111,18 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         KEloss = z_dots[:,0]**2 + z_dots[:,1]**2
         # accel loss
         Aloss = z_accel[:,0]**2 + z_accel[:,1]**2
+        # AV loss. (accel paralell to veloc)
+        z_dot_norms = torch.norm(z_dots,p=2,dim=1,keepdim=True)
+        accel_in_v_dir = torch.bmm(z_dots.view((-1,1,2)), z_accel).view((-1,1))  /  z_dot_norms
+        AVloss = accel_in_v_dir ** 2
         # self advection loss
         selfadvect = (torch.bmm(z_jacs, z_dots.reshape((n_points,fullshape[2],1))) + z_accel)
         selfadvectloss = selfadvect[:,0]**2 + selfadvect[:,1]**2
-        
+        # Kurvature loss. 
+        z_dots_pad = F.pad(z_dots,(0,1))
+        z_accel_pad = F.pad(z_accel.view((-1,2)),(0,1))
+        kurvature = torch.norm(torch.cross(z_dots_pad, z_accel_pad),p=2,dim=1,keepdim=True)  /  z_dot_norms ** 3
+        Kloss = (kurvature-1)**2
         ## UNIFORM SPACETIME VELOCITY REGULARIZERS
         tzu = BB.samplerandom(N = 3000, bbscale = 1.1);
         z_dots_u, z_jacs_u, z_accel_u = model.velfunc.getGrads(tzu);
@@ -147,6 +143,8 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         separate_losses[8,batch] = selfadvectloss.mean().item()
         separate_losses[9,batch] = u_selfadvectloss.mean().item()
         separate_losses[10,batch] = u_div2loss.mean().item()
+        separate_losses[11,batch] = AVloss.mean().item()
+        separate_losses[12,batch] = Kloss.mean().item()
         
         # combine energies
 #         timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
@@ -156,11 +154,13 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
                 + 0 * rigid2loss.mean() \
                 + 0 * vgradloss.mean() \
                 + 0 * KEloss.mean() \
-                + .00125 * Aloss.mean() \
+                + 0 * Aloss.mean() \
+                + .0006125 * AVloss.mean() \
+                + .00125 * Kloss.mean() \
                 + 0 * vgradloss.mean() \
-                + .025 * selfadvectloss.mean() \
+                + 0 * selfadvectloss.mean() \
                 + 0 * u_selfadvectloss.mean() \
-                + .025 * u_div2loss.mean() 
+                + 0 * u_div2loss.mean() 
 #         - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
         reglosstime = time.time()-cpt
     
@@ -222,7 +222,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         separate_times[2,batch] = steptime
         separate_times[3,batch] = savetime
             
-    st.save_trajectory(model, z_target_full, savedir=outname, savename='final', nsteps=40, dpiv=400, n=1500)
+    st.save_trajectory(model, z_target_full, savedir=outname, savename='final', nsteps=40, dpiv=400, n=1000)
     
     # save stats
     (fig,(ax1,ax2,ax3,ax4,ax5))=plt.subplots(5,1)
