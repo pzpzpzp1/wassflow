@@ -14,7 +14,7 @@ import os
 from tqdm import tqdm
 # import tensorflow as tf
 
-def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=FfjordModel(), outname = 'results/outcache/', visualize=False, sqrtfitloss=False):
+def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=FfjordModel(), outname = 'results/outcache/', visualize=False, sqrtfitloss=True):
     z_target_full, __ = ImageDataset.normalize_samples(z_target_full) # normalize to fit in [0,1] box.
     my_loss_f = SamplesLoss("sinkhorn", p=2, blur=0.00001)
     if not os.path.exists(outname):
@@ -32,12 +32,12 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
     T = z_target_full.shape[0];
     BB = BoundingBox(z_target_full);
     
-    separate_losses = np.empty((13, n_iters))
+    separate_losses = np.empty((50, n_iters))
     separate_times = np.empty((4, n_iters))
     savetime = 0
-    losses = []
-    lrs=[]
-    n_subs=[]
+    losses = np.empty((1, n_iters))
+    lrs=np.empty((1, n_iters))
+    n_subs=np.empty((1, n_iters))
     start = time.time()
     start0 = time.time()
     
@@ -81,10 +81,10 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         
         cpt = time.time();
         ## MASS BASED VELOCITY REGULARIZERS
-        fbt = torch.cat((torch.rand(5).to(device), torch.zeros(1).to(device)),0).sort()[0]
+        fbt = torch.cat((torch.rand(3).to(device), torch.zeros(1).to(device)),0).sort()[0]
         tzm = torch.zeros(0,3).to(device)
         for i in range(T-1):
-            subsample_inds = torch.randperm(fullshape[1])[:200];
+            subsample_inds = torch.randperm(fullshape[1])[:100];
             # forward
             z_t = model(z_target_full[i,subsample_inds,:], integration_times = i + fbt)[1:,:,:];
             zz = z_t.reshape(z_t.shape[0]*z_t.shape[1], z_t.shape[2])
@@ -122,9 +122,9 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         z_dots_pad = F.pad(z_dots,(0,1))
         z_accel_pad = F.pad(z_accel.view((-1,2)),(0,1))
         kurvature = torch.norm(torch.cross(z_dots_pad, z_accel_pad),p=2,dim=1,keepdim=True)  /  z_dot_norms ** 3
-        Kloss = (kurvature-1)**2
+        Kloss = (kurvature - .5)**2
         ## UNIFORM SPACETIME VELOCITY REGULARIZERS
-        tzu = BB.samplerandom(N = 3000, bbscale = 1.1);
+        tzu = BB.samplerandom(N = 1500, bbscale = 1.1);
         z_dots_u, z_jacs_u, z_accel_u = model.velfunc.getGrads(tzu);
         n_points_u = z_dots_u.shape[0]
         
@@ -132,7 +132,12 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         selfadvect_u = (torch.bmm(z_jacs_u, z_dots_u.reshape((n_points_u,fullshape[2],1))) + z_accel_u)
         u_selfadvectloss = selfadvect_u[:,0]**2 + selfadvect_u[:,1]**2
         # divergence squared
-        u_div2loss = (z_jacs_u[:,0,0]+z_jacs_u[:,1,1])**2        
+        u_div2loss = (z_jacs_u[:,0,0]+z_jacs_u[:,1,1])**2    
+        # acceleration
+        u_aloss = z_accel_u[:,0]**2 + z_accel_u[:,1]**2
+        # self advection loss
+        selfadvect_u = (torch.bmm(z_jacs_u, z_dots_u.reshape((n_points_u,fullshape[2],1))) + z_accel_u)
+        u_selfadvectloss = selfadvect_u[:,0]**2 + selfadvect_u[:,1]**2
         
         separate_losses[2,batch] = div2loss.mean().item()
         separate_losses[3,batch] = curl2loss.mean().item()
@@ -145,35 +150,40 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         separate_losses[10,batch] = u_div2loss.mean().item()
         separate_losses[11,batch] = AVloss.mean().item()
         separate_losses[12,batch] = Kloss.mean().item()
+        separate_losses[13,batch] = u_aloss.mean().item()
+        separate_losses[13,batch] = u_selfadvectloss.mean().item()
         
         # combine energies
 #         timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
 #         timeIndices = (z_sample[:,0] < ((T-1.)/.001)).detach()
         regloss = 0 * div2loss.mean() \
-                - 0* torch.clamp(curl2loss.mean(), 0, 3) \
+                - 0* torch.clamp(curl2loss.mean(), 0, .02) \
                 + 0 * rigid2loss.mean() \
                 + 0 * vgradloss.mean() \
                 + 0 * KEloss.mean() \
-                + 0 * Aloss.mean() \
-                + .0006125 * AVloss.mean() \
-                + .00125 * Kloss.mean() \
+                + .000 * Aloss.mean() \
                 + 0 * vgradloss.mean() \
-                + 0 * selfadvectloss.mean() \
+                + .0000 * selfadvectloss.mean() \
                 + 0 * u_selfadvectloss.mean() \
-                + 0 * u_div2loss.mean() 
+                + .000 * u_div2loss.mean() \
+                + 0 * AVloss.mean() \
+                + 0 * Kloss.mean() \
+                + 0 * u_aloss.mean() \
+                + 0 * u_selfadvectloss.mean() 
 #         - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
         reglosstime = time.time()-cpt
     
         loss = fitloss + fitlossb; 
         loss = torch.sqrt(loss) if sqrtfitloss else loss
         totalloss = loss + regloss
-        losses.append(totalloss.item())
-        n_subs.append(n_subsample)
-        lrs.append(currlr)
+        losses[0,batch]=totalloss.item()
+        n_subs[0,batch]=n_subsample
+        lrs[0,batch]=currlr
         
         cpt = time.time()
         totalloss.backward()
         optimizer.step()
+        model.velfunc.imap.step((batch+1)/n_iters)
         steptime = time.time()-cpt
         
         if (batch>1 and batch % 50 == 0):
@@ -226,9 +236,9 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
     
     # save stats
     (fig,(ax1,ax2,ax3,ax4,ax5))=plt.subplots(5,1)
-    ax1.plot(n_subs,'r'); ax1.set_ylabel('n_sub')
-    ax2.plot(lrs,'g'); ax2.set_ylabel('lr') 
-    ax3.plot(losses,'b'); ax3.set_ylabel('loss') 
+    ax1.plot(n_subs[0,:],'r'); ax1.set_ylabel('n_sub')
+    ax2.plot(lrs[0,:],'g'); ax2.set_ylabel('lr') 
+    ax3.plot(losses[0,:],'b'); ax3.set_ylabel('loss') 
     ax4.plot(separate_times[0,:],'r'); 
     ax4.plot(separate_times[1,:],'g'); 
     ax4.plot(separate_times[2,:],'b'); ax4.set_ylabel('runtimes') 

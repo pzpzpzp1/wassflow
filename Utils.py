@@ -176,20 +176,45 @@ class BoundingBox():
     
 # fourier features mapping
 class InputMapping(nn.Module):
-    def __init__(self, d_in, n_freq, sigma=2, tdiv = 2):
+    def __init__(self, d_in, n_freq, sigma=2, tdiv = 2, incrementalMask = True):
         super().__init__()
         Bmat = torch.randn(n_freq, d_in) * sigma/np.sqrt(d_in)/2.0; # gaussian
         Bmat[:,d_in-1] /= tdiv; # time frequencies are a quarter of spacial frequencies.
+        
+        Bnorms = torch.norm(Bmat,p=2,dim=1);
+        sortedBnorms, sortIndices = torch.sort(Bnorms)
+        Bmat = Bmat[sortIndices,:]
+        
         self.d_in = d_in;
         self.n_freq = n_freq;
         self.d_out = n_freq * 2 + d_in;
         self.B = nn.Linear(d_in, self.d_out, bias=False)
         with torch.no_grad():
             self.B.weight = nn.Parameter(Bmat.to(device), requires_grad=False)
+            self.mask = nn.Parameter(torch.zeros(1,n_freq), requires_grad=False)
+        
+        self.incrementalMask = incrementalMask
+        if not incrementalMask:
+            self.mask = nn.Parameter(torch.ones(1,n_freq), requires_grad=False)
+        
+    # 50% should mean mask is all ones.
+    def step(self, progressPercent):
+        if self.incrementalMask:
+            float_filled = 2*progressPercent*self.n_freq
+            int_filled = int(float_filled // 1)
+            remainder = float_filled % 1
+            
+            if int_filled >= self.n_freq:
+                # pdb.set_trace()
+                self.mask[0,:]=1
+            else:
+                self.mask[0,0:int_filled]=1
+                self.mask[0,int_filled]=remainder
+            
     def forward(self, xi):
         y = self.B(2*np.pi*xi)
-        # return torch.cat([torch.sin(x), torch.cos(x), xi[:,[1, 2]]], dim=-1)
-        return torch.cat([torch.sin(y), torch.cos(y), xi], dim=-1)
+        # pdb.set_trace()
+        return torch.cat([torch.sin(y)*self.mask, torch.cos(y)*self.mask, xi], dim=-1)
 
 class SaveTrajectory():
 
@@ -198,6 +223,18 @@ class SaveTrajectory():
         allocated = round(torch.cuda.memory_allocated(devnum)/1024**3,2);
         reserved = round(torch.cuda.memory_reserved(devnum)/1024**3,2);
         print('Allocated:', allocated, 'GB', ' Reserved:', reserved, 'GB')
+    
+    def save_losses(losses, separate_losses, outfolder='results/outcache/', savename = 'losses.pdf', start = 1, end = 10000, maxcap=100):
+        ## SEPARATE LOSSES PLOT
+        separate_losses[separate_losses>maxcap]=maxcap; losses[losses>maxcap]=maxcap
+        (fig,(ax1,ax2))=plt.subplots(2,1)
+        ax1.plot(losses[0,start:end],'k'); ax1.set_ylabel('loss'); ax1.set_yscale("log")
+        ax2.plot(separate_losses[0,start:end],'g'); 
+        ax2.plot(separate_losses[1,start:end],'g'); 
+        ax2.plot(separate_losses[9,start:end],'r'); 
+        ax2.plot(separate_losses[10,start:end],'b'); 
+        ax2.plot(separate_losses[3,start:end],'y'); ax2.set_ylabel('loss') 
+        plt.savefig(outfolder + savename); 
     
     def save_trajectory(model, z_target_full, savedir='results/outcache/', savename = '', nsteps=20, dpiv=100, n=4000):
         
@@ -244,7 +281,7 @@ class SaveTrajectory():
             
         # reverse
         moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
-        with moviewriter.saving(fig, savedir+'reverse_'+savename+'.mp4', dpiv):
+        with moviewriter.saving(fig, savedir+'rev_'+savename+'.mp4', dpiv):
             for i in range(nsteps):
                 for t in range(T):
                     plt.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c='green', edgecolors='black')
@@ -263,7 +300,7 @@ class SaveTrajectory():
         # forward and back
         ts = torch.linspace(0,1,nsteps)
         moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
-        with moviewriter.saving(fig, savedir+'forback_'+savename+'.mp4', dpiv):
+        with moviewriter.saving(fig, savedir+'fb_'+savename+'.mp4', dpiv):
             for tt in range(T-1):
                 integration_times = torch.linspace(tt,tt+1,nsteps).to(device);
                 x_traj_reverse_t = model(z_target[tt+1,:,:], integration_times, reverse=True)
