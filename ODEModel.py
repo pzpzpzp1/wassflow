@@ -42,11 +42,7 @@ class velocMLP(nn.Module):
         return imap, net
     
     def custom_linear(in_features, out_features, initzero = False):
-        m = nn.Linear(in_features, out_features)
-        if initzero:
-            m.weight *= 0
-            m.bias *= 0
-        return m
+        return nn.Linear(in_features, out_features)
     
     def get_z_dot(self, t, z):
         """z_dot is parameterized by a NN: z_dot = NN(t, z(t))"""
@@ -110,7 +106,7 @@ class velocMLP(nn.Module):
 
 class FfjordModel(torch.nn.Module):
     
-    def __init__(self, in_features=3, hidden_features=512, hidden_layers=2, out_features=2, sigmac = 3, n_freq = 70, tdiv = 1, incrementalMask = True):
+    def __init__(self, in_features=3, hidden_features=512, hidden_layers=2, out_features=2, sigmac = 3, n_freq = 70, tdiv = 1, incrementalMask = True, initzero = False):
         super(FfjordModel, self).__init__()
         self.modelshape = {'in_features': in_features, \
                            'hidden_features': hidden_features,\
@@ -118,7 +114,7 @@ class FfjordModel(torch.nn.Module):
                            'out_features': out_features,\
                            'n_freq': n_freq,\
                           }
-        self.velfunc = velocMLP(in_features, hidden_features, hidden_layers, out_features, sigmac, n_freq, tdiv, incrementalMask)
+        self.velfunc = velocMLP(in_features, hidden_features, hidden_layers, out_features, sigmac, n_freq, tdiv, incrementalMask, initzero)
     def save_state(self, fn='results/outcache/models/state.tar'):
         selfdict = self.state_dict()
         selfdict['modelshape'] = self.modelshape

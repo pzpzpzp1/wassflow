@@ -197,10 +197,9 @@ class InputMapping(nn.Module):
         if not incrementalMask:
             self.mask = nn.Parameter(torch.ones(1,n_freq), requires_grad=False)
         
-    # 50% should mean mask is all ones.
     def step(self, progressPercent):
         if self.incrementalMask:
-            float_filled = 2*progressPercent*self.n_freq
+            float_filled = (progressPercent*self.n_freq)/.7
             int_filled = int(float_filled // 1)
             remainder = float_filled % 1
             
@@ -215,6 +214,7 @@ class InputMapping(nn.Module):
         y = self.B(2*np.pi*xi)
         # pdb.set_trace()
         return torch.cat([torch.sin(y)*self.mask, torch.cos(y)*self.mask, xi], dim=-1)
+        # return torch.cat([torch.sin(y), torch.cos(y), xi], dim=-1)
 
 class SaveTrajectory():
 
@@ -233,9 +233,11 @@ class SaveTrajectory():
         ax1.plot(losses[0,start:end],'k'); ax1.set_ylabel('loss'); ax1.set_yscale("log")
         ax2.plot(separate_losses[0,start:end],'g'); 
         ax2.plot(separate_losses[1,start:end],'g'); 
+        # ax2.plot(separate_losses[0,start:end]*100,'g'); 
+        # ax2.plot(separate_losses[1,start:end]*100,'g'); 
         ax2.plot(separate_losses[3,start:end],'y'); 
         ax2.plot(separate_losses[7,start:end],'c'); 
-        ax2.plot(separate_losses[9,start:end],'r'); 
+        ax2.plot(separate_losses[8,start:end],'r'); 
         ax2.plot(separate_losses[10,start:end],'b'); 
         # ax2.plot(separate_losses[2,start:end],'k'); 
         # ax2.plot(separate_losses[4,start:end],'k'); 

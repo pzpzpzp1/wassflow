@@ -45,10 +45,8 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
     if n_subsample > fullshape[1]:
         n_subsample = fullshape[1]
     subsample_inds = torch.randperm(fullshape[1])[:n_subsample];
+    start = time.time()
     for batch in tqdm(range(n_iters)):
-        if (batch % stepsperbatch == 1):
-            start = time.time()
-
         # subsample z_target_full to z_target for loss computation
         z_target = torch.zeros([fullshape[0], n_subsample, fullshape[2]]).to(z_target_full)
         for i in range(fullshape[0]):
@@ -70,9 +68,9 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
             fitlossb += my_loss_f(z_target[(T-1)-t-1,:,:], z_t_b[1,:,:])
             
         if batch==0:
-            # scaling factor chosen at start to normalize fitting loss to 10
-            fitloss0 = fitloss.item()/10.; 
-            fitlossb0 = fitlossb.item()/10.; 
+            # scaling factor chosen at start to normalize fitting loss
+            fitloss0 = fitloss.item(); 
+            fitlossb0 = fitlossb.item(); 
         fitloss/=fitloss0
         fitlossb/=fitlossb0
         separate_losses[0,batch] = fitloss
@@ -140,34 +138,33 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         u_selfadvectloss = selfadvect_u[:,0]**2 + selfadvect_u[:,1]**2
         
         separate_losses[2,batch] = div2loss.mean().item()
-        separate_losses[3,batch] = curl2loss.mean().item()
-        separate_losses[4,batch] = rigid2loss.mean().item()
-        separate_losses[5,batch] = vgradloss.mean().item()
-        separate_losses[6,batch] = KEloss.mean().item()
+        separate_losses[3,batch] = rigid2loss.mean().item()
+        separate_losses[4,batch] = vgradloss.mean().item()
+        separate_losses[5,batch] = KEloss.mean().item()
+        separate_losses[6,batch] = selfadvectloss.mean().item()
         separate_losses[7,batch] = Aloss.mean().item()
-        separate_losses[8,batch] = selfadvectloss.mean().item()
-        separate_losses[9,batch] = u_selfadvectloss.mean().item()
-        separate_losses[10,batch] = u_div2loss.mean().item()
-        separate_losses[11,batch] = AVloss.mean().item()
-        separate_losses[12,batch] = Kloss.mean().item()
+        separate_losses[8,batch] = AVloss.mean().item()
+        separate_losses[9,batch] = Kloss.mean().item()
+        separate_losses[10,batch] = curl2loss.mean().item()
+        separate_losses[11,batch] = u_selfadvectloss.mean().item()
+        separate_losses[12,batch] = u_div2loss.mean().item()
         separate_losses[13,batch] = u_aloss.mean().item()
-        separate_losses[13,batch] = u_selfadvectloss.mean().item()
+        separate_losses[14,batch] = u_selfadvectloss.mean().item()
         
         # combine energies
 #         timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
 #         timeIndices = (z_sample[:,0] < ((T-1.)/.001)).detach()
         regloss = 0 * div2loss.mean() \
-                - 0* torch.clamp(curl2loss.mean(), 0, .02) \
                 + 0 * rigid2loss.mean() \
                 + 0 * vgradloss.mean() \
                 + 0 * KEloss.mean() \
-                + .001 * Aloss.mean() \
-                + 0 * vgradloss.mean() \
-                + .01 * selfadvectloss.mean() \
-                + 0 * u_selfadvectloss.mean() \
-                + .01 * u_div2loss.mean() \
+                + .000 * selfadvectloss.mean() \
+                + .0001 * Aloss.mean() \
                 + 0 * AVloss.mean() \
                 + 0 * Kloss.mean() \
+                - 0* torch.clamp(curl2loss.mean(), 0, .02) \
+                + 0 * u_selfadvectloss.mean() \
+                + .000 * u_div2loss.mean() \
                 + 0 * u_aloss.mean() \
                 + 0 * u_selfadvectloss.mean() 
 #         - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
@@ -175,7 +172,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
     
         loss = fitloss + fitlossb; 
         loss = torch.sqrt(loss) if sqrtfitloss else loss
-        totalloss = 100*loss + regloss
+        totalloss = loss + regloss
         losses[0,batch]=totalloss.item()
         n_subs[0,batch]=n_subsample
         lrs[0,batch]=currlr
@@ -196,7 +193,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
             if n_subsample > max_n_subsample:
                 n_subsample = max_n_subsample
             
-        if (batch % stepsperbatch == 0):
+        if (batch % stepsperbatch == 0 or batch == n_iters-1):
             scheduler.step(totalloss.item()) # timestep schedule.
             for g in optimizer.param_groups:
                 currlr = g['lr'];
@@ -225,7 +222,9 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
             
             # print summary stats
             st.gpu_usage()
-            print('[Loss:',f"{loss.item():.4f}",'| lr:',f"{currlr}", '| n_subsample:', f"{n_subsample}]",'\n[Total time :',f"{(time.time()-start0):.4f}",'| Iter:',f"{ptime:.4f}",'| fit:',f"{fitlosstime:.4f}",'| reg:',f"{reglosstime:.4f}",'| save:',f"{savetime:.4f})",'| autograd:',f"{steptime:.4f}]")
+            print('[Loss:',f"{totalloss.item():.4f}",'| lr:',f"{currlr}", '| n_subsample:', f"{n_subsample}]",'\n[Total time :',f"{(time.time()-start0):.4f}",'| Iter:',f"{ptime:.4f}",'| fit:',f"{fitlosstime:.4f}",'| reg:',f"{reglosstime:.4f}",'| save:',f"{savetime:.4f})",'| autograd:',f"{steptime:.4f}]\n")
+            
+            start = time.time() # reset clock to next save
 
         separate_times[0,batch] = fitlosstime
         separate_times[1,batch] = reglosstime
@@ -239,10 +238,12 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
     ax1.plot(n_subs[0,:],'r'); ax1.set_ylabel('n_sub')
     ax2.plot(lrs[0,:],'g'); ax2.set_ylabel('lr') 
     ax3.plot(losses[0,:],'b'); ax3.set_ylabel('loss\n'+f"{losses[0,:].min():.4f}") 
-    ax4.plot(separate_times[0,:],'r'); 
-    ax4.plot(separate_times[1,:],'g'); 
-    ax4.plot(separate_times[2,:],'b'); ax4.set_ylabel('runtimes') 
-    ax5.plot(separate_times[3,:],'r'); ax5.set_ylabel('savetimes') 
+    ax4.plot(separate_times[0,:],'r'); # fit
+    ax4.plot(separate_times[1,:],'g'); # reg
+    ax4.plot(separate_times[2,:],'b'); # step
+    ax4.set_ylabel('runtimes') 
+    ax5.plot(separate_times[3,:],'r'); # save
+    ax5.set_ylabel('savetimes') 
     plt.savefig(outname + "stats.pdf"); 
     plt.close(fig)
     
@@ -254,6 +255,8 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
                    'separate_times': separate_times\
                   }
     torch.save(summarydata, outname + "summary.tar")
+    
+    st.save_losses(losses, separate_losses, outfolder=outname, maxcap=10000)
     
     return model, losses, separate_losses, lrs, n_subs, separate_times
 
