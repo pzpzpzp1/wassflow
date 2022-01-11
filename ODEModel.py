@@ -24,23 +24,30 @@ from Utils import InputMapping, BoundingBox, ImageDataset, SaveTrajectory, Sine,
 from Utils import SaveTrajectory as st
 
 class velocMLP(nn.Module):
-    def __init__(self, in_features=3, hidden_features=512, hidden_layers=2, out_features=2, sigmac = 3, n_freq = 70, tdiv = 1):
+    def __init__(self, in_features=3, hidden_features=512, hidden_layers=2, out_features=2, sigmac = 3, n_freq = 70, tdiv = 1, incrementalMask = True, initzero = False):
         super(velocMLP, self).__init__()
-        self.imap, self.f = velocMLP.mlp(in_features, hidden_features, hidden_layers, out_features, sigmac, n_freq, tdiv)
+        self.imap, self.f = velocMLP.mlp(in_features, hidden_features, hidden_layers, out_features, sigmac, n_freq, tdiv, incrementalMask, initzero)
         
-    def mlp(in_features=3, hidden_features=512, hidden_layers=2, out_features=2, sigmac = 10, n_freq = 256, tdiv = 6):
-        imap = InputMapping(in_features, n_freq, sigma=sigmac, tdiv = tdiv)
+    def mlp(in_features=3, hidden_features=512, hidden_layers=2, out_features=2, sigmac = 10, n_freq = 256, tdiv = 6, incrementalMask = True, initzero = False):
+        imap = InputMapping(in_features, n_freq, sigma=sigmac, tdiv = tdiv, incrementalMask=incrementalMask)
         net = []
         net.append(imap)
-        net.append(nn.Linear(imap.d_out, hidden_features))
+        net.append(velocMLP.custom_linear(imap.d_out, hidden_features, initzero))
         for i in range(hidden_layers):
             net.append(nn.Tanh())
-            net.append(nn.Linear(hidden_features, hidden_features))
+            net.append(velocMLP.custom_linear(hidden_features, hidden_features, initzero))
         net.append(nn.Softplus())
-        net.append(nn.Linear(hidden_features, out_features));
+        net.append(velocMLP.custom_linear(hidden_features, out_features, initzero));
         net = nn.Sequential(*net)
         return imap, net
-        
+    
+    def custom_linear(in_features, out_features, initzero = False):
+        m = nn.Linear(in_features, out_features)
+        if initzero:
+            m.weight *= 0
+            m.bias *= 0
+        return m
+    
     def get_z_dot(self, t, z):
         """z_dot is parameterized by a NN: z_dot = NN(t, z(t))"""
         if t.dim()==0:
@@ -103,7 +110,7 @@ class velocMLP(nn.Module):
 
 class FfjordModel(torch.nn.Module):
     
-    def __init__(self, in_features=3, hidden_features=512, hidden_layers=2, out_features=2, sigmac = 3, n_freq = 70, tdiv = 1):
+    def __init__(self, in_features=3, hidden_features=512, hidden_layers=2, out_features=2, sigmac = 3, n_freq = 70, tdiv = 1, incrementalMask = True):
         super(FfjordModel, self).__init__()
         self.modelshape = {'in_features': in_features, \
                            'hidden_features': hidden_features,\
@@ -111,7 +118,7 @@ class FfjordModel(torch.nn.Module):
                            'out_features': out_features,\
                            'n_freq': n_freq,\
                           }
-        self.velfunc = velocMLP(in_features, hidden_features, hidden_layers, out_features, sigmac, n_freq, tdiv)
+        self.velfunc = velocMLP(in_features, hidden_features, hidden_layers, out_features, sigmac, n_freq, tdiv, incrementalMask)
     def save_state(self, fn='results/outcache/models/state.tar'):
         selfdict = self.state_dict()
         selfdict['modelshape'] = self.modelshape

@@ -70,9 +70,9 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
             fitlossb += my_loss_f(z_target[(T-1)-t-1,:,:], z_t_b[1,:,:])
             
         if batch==0:
-            # scaling factor chosen at start to normalize fitting loss
-            fitloss0 = fitloss.item(); # constant. not differentiated through
-            fitlossb0 = fitlossb.item(); # constant. not differentiated through
+            # scaling factor chosen at start to normalize fitting loss to 10
+            fitloss0 = fitloss.item()/10.; 
+            fitlossb0 = fitlossb.item()/10.; 
         fitloss/=fitloss0
         fitlossb/=fitlossb0
         separate_losses[0,batch] = fitloss
@@ -161,11 +161,11 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
                 + 0 * rigid2loss.mean() \
                 + 0 * vgradloss.mean() \
                 + 0 * KEloss.mean() \
-                + .000 * Aloss.mean() \
+                + .001 * Aloss.mean() \
                 + 0 * vgradloss.mean() \
-                + .0000 * selfadvectloss.mean() \
+                + .01 * selfadvectloss.mean() \
                 + 0 * u_selfadvectloss.mean() \
-                + .000 * u_div2loss.mean() \
+                + .01 * u_div2loss.mean() \
                 + 0 * AVloss.mean() \
                 + 0 * Kloss.mean() \
                 + 0 * u_aloss.mean() \
@@ -175,7 +175,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
     
         loss = fitloss + fitlossb; 
         loss = torch.sqrt(loss) if sqrtfitloss else loss
-        totalloss = loss + regloss
+        totalloss = 100*loss + regloss
         losses[0,batch]=totalloss.item()
         n_subs[0,batch]=n_subsample
         lrs[0,batch]=currlr
@@ -220,12 +220,12 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
             
             cpt = time.time()
             if batch > 0:
-                st.save_trajectory(model, z_target_full, savedir=outname, savename=f"{batch:04}", nsteps=14, n=300, dpiv=400)
+                st.save_trajectory(model, z_target_full, savedir=outname, savename=f"{batch:04}", nsteps=11, n=300, dpiv=400)
             savetime = time.time()-cpt
             
             # print summary stats
             st.gpu_usage()
-            print('(loss:',f"{loss.item():.4f})",'(lr:',f"{currlr})", '(n_subsample:', f"{n_subsample})",'\n(time elapsed:',f"{ptime:.4f})",'(total time:',f"{(time.time()-start0):.4f})",'(fit time:',f"{fitlosstime:.4f})",'(reg loss time:',f"{reglosstime:.4f})",'(savetime:',f"{savetime:.4f})",'(steptime:',f"{steptime:.4f})")
+            print('[Loss:',f"{loss.item():.4f}",'| lr:',f"{currlr}", '| n_subsample:', f"{n_subsample}]",'\n[Total time :',f"{(time.time()-start0):.4f}",'| Iter:',f"{ptime:.4f}",'| fit:',f"{fitlosstime:.4f}",'| reg:',f"{reglosstime:.4f}",'| save:',f"{savetime:.4f})",'| autograd:',f"{steptime:.4f}]")
 
         separate_times[0,batch] = fitlosstime
         separate_times[1,batch] = reglosstime
@@ -238,7 +238,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
     (fig,(ax1,ax2,ax3,ax4,ax5))=plt.subplots(5,1)
     ax1.plot(n_subs[0,:],'r'); ax1.set_ylabel('n_sub')
     ax2.plot(lrs[0,:],'g'); ax2.set_ylabel('lr') 
-    ax3.plot(losses[0,:],'b'); ax3.set_ylabel('loss') 
+    ax3.plot(losses[0,:],'b'); ax3.set_ylabel('loss\n'+f"{losses[0,:].min():.4f}") 
     ax4.plot(separate_times[0,:],'r'); 
     ax4.plot(separate_times[1,:],'g'); 
     ax4.plot(separate_times[2,:],'b'); ax4.set_ylabel('runtimes') 

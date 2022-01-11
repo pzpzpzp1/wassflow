@@ -224,16 +224,28 @@ class SaveTrajectory():
         reserved = round(torch.cuda.memory_reserved(devnum)/1024**3,2);
         print('Allocated:', allocated, 'GB', ' Reserved:', reserved, 'GB')
     
-    def save_losses(losses, separate_losses, outfolder='results/outcache/', savename = 'losses.pdf', start = 1, end = 10000, maxcap=100):
+    def save_losses(losses_in, separate_losses_in, outfolder='results/outcache/', savename = 'losses.pdf', start = 1, end = 10000, maxcap=100):
         ## SEPARATE LOSSES PLOT
+        losses=losses_in.copy()
+        separate_losses=separate_losses_in.copy()
         separate_losses[separate_losses>maxcap]=maxcap; losses[losses>maxcap]=maxcap
         (fig,(ax1,ax2))=plt.subplots(2,1)
         ax1.plot(losses[0,start:end],'k'); ax1.set_ylabel('loss'); ax1.set_yscale("log")
         ax2.plot(separate_losses[0,start:end],'g'); 
         ax2.plot(separate_losses[1,start:end],'g'); 
+        ax2.plot(separate_losses[3,start:end],'y'); 
+        ax2.plot(separate_losses[7,start:end],'c'); 
         ax2.plot(separate_losses[9,start:end],'r'); 
         ax2.plot(separate_losses[10,start:end],'b'); 
-        ax2.plot(separate_losses[3,start:end],'y'); ax2.set_ylabel('loss') 
+        # ax2.plot(separate_losses[2,start:end],'k'); 
+        # ax2.plot(separate_losses[4,start:end],'k'); 
+        # ax2.plot(separate_losses[5,start:end],'k'); 
+        # ax2.plot(separate_losses[6,start:end],'k'); 
+        # ax2.plot(separate_losses[7,start:end],'k'); 
+        # ax2.plot(separate_losses[8,start:end],'k'); 
+        # ax2.plot(separate_losses[11,start:end],'k'); 
+        # ax2.plot(separate_losses[12,start:end],'k'); 
+        ax2.set_ylabel('loss') 
         plt.savefig(outfolder + savename); 
     
     def save_trajectory(model, z_target_full, savedir='results/outcache/', savename = '', nsteps=20, dpiv=100, n=4000):
@@ -363,9 +375,9 @@ class MiscTransforms():
         x.requires_grad = True
         z = x.clone()  # Moving point cloud
 
+        # pdb.set_trace()
         if use_cuda:
             torch.cuda.synchronize()
-        start = time.time()
 
         nits = 10
         for it in range(nits):
@@ -373,5 +385,5 @@ class MiscTransforms():
             wasserstein_zy = Loss(z, y)
             [grad_z] = torch.autograd.grad(wasserstein_zy, [z])
             z -= grad_z / a[:, None]  # Apply the regularized Brenier map
-        end = time.time()
+        
         return z
