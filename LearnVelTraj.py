@@ -25,7 +25,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
     if n_subsample > max_n_subsample:
         n_subsample = max_n_subsample
     currlr = 1e-4;
-    stepsperbatch=5
+    stepsperbatch=50
     optimizer = torch.optim.Adam(list(model.parameters()), lr=currlr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',factor=.5,patience=1,min_lr=1e-7)
     
@@ -123,7 +123,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         z_dots_pad = F.pad(z_dots,(0,1))
         z_accel_pad = F.pad(z_accel.view((-1,2)),(0,1))
         kurvature = torch.norm(torch.cross(z_dots_pad, z_accel_pad),p=2,dim=1,keepdim=True)  /  z_dot_norms ** 3
-        Kloss = (kurvature - .5)**2
+        Kloss = (kurvature - 1)**2
         ## UNIFORM SPACETIME VELOCITY REGULARIZERS
         tzu = BB.samplerandom(N = 1500, bbscale = 1.1);
         z_dots_u, z_jacs_u, z_accel_u = model.velfunc.getGrads(tzu);
@@ -161,13 +161,13 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
                 + 0 * rigid2loss.mean() \
                 + 0 * vgradloss.mean() \
                 + 0 * KEloss.mean() \
-                + .000 * selfadvectloss.mean() \
+                + .1 * selfadvectloss.mean() \
                 + .0001 * Aloss.mean() \
                 + 0 * AVloss.mean() \
-                + 0 * Kloss.mean() \
+                + .1 * Kloss.mean() \
                 - 0* torch.clamp(curl2loss.mean(), 0, .02) \
                 + 0 * u_selfadvectloss.mean() \
-                + .000 * u_div2loss.mean() \
+                + .1 * u_div2loss.mean() \
                 + 0 * u_aloss.mean() \
                 + 0 * u_selfadvectloss.mean() 
 #         - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
@@ -233,9 +233,6 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         separate_times[1,batch] = reglosstime
         separate_times[2,batch] = steptime
         separate_times[3,batch] = savetime
-            
-    st.save_trajectory(model, z_target_full, savedir=outname, savename='final', nsteps=40, dpiv=400, n=1000)
-    
     # save stats
     (fig,(ax1,ax2,ax3,ax4,ax5))=plt.subplots(5,1)
     ax1.plot(n_subs[0,:],'r'); ax1.set_ylabel('n_sub')
@@ -244,7 +241,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
     ax4.plot(separate_times[0,:],'r'); # fit
     ax4.plot(separate_times[1,:],'g'); # reg
     ax4.plot(separate_times[2,:],'b'); # step
-    ax4.set_ylabel('runtimes') 
+    ax4.set_ylabel('runtimes\n' + f"{(time.time()-start0):.4f}") 
     ax5.plot(separate_times[3,:],'r'); # save
     ax5.set_ylabel('savetimes') 
     plt.savefig(outname + "stats.pdf"); 
@@ -260,6 +257,8 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
     torch.save(summarydata, outname + "summary.tar")
     
     st.save_losses(losses, separate_losses, outfolder=outname, maxcap=10000)
+    
+    st.save_trajectory(model, z_target_full, savedir=outname, savename='final', nsteps=40, dpiv=400, n=1000)
     
     return model, losses, separate_losses, lrs, n_subs, separate_times
 

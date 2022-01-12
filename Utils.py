@@ -230,15 +230,15 @@ class SaveTrajectory():
         separate_losses=separate_losses_in.copy()
         separate_losses[separate_losses>maxcap]=maxcap; losses[losses>maxcap]=maxcap
         (fig,(ax1,ax2))=plt.subplots(2,1)
-        ax1.plot(losses[0,start:end],'k'); ax1.set_ylabel('loss'); ax1.set_yscale("log")
+        ax1.plot(losses[0,start:end],'k'); ax1.set_ylabel(f'loss\n{losses[0,:].min().item():.2f}'); ax1.set_yscale("log")
         ax2.plot(separate_losses[0,start:end],'g'); 
         ax2.plot(separate_losses[1,start:end],'g'); 
         # ax2.plot(separate_losses[0,start:end]*100,'g'); 
         # ax2.plot(separate_losses[1,start:end]*100,'g'); 
-        ax2.plot(separate_losses[3,start:end],'y'); 
-        ax2.plot(separate_losses[7,start:end],'c'); 
-        ax2.plot(separate_losses[8,start:end],'r'); 
-        ax2.plot(separate_losses[10,start:end],'b'); 
+        ax2.plot(separate_losses[6,start:end],'y'); # self adv
+        ax2.plot(separate_losses[7,start:end],'c'); # accel
+        ax2.plot(separate_losses[9,start:end],'r'); # kurv
+        ax2.plot(separate_losses[12,start:end],'b'); # u div
         # ax2.plot(separate_losses[2,start:end],'k'); 
         # ax2.plot(separate_losses[4,start:end],'k'); 
         # ax2.plot(separate_losses[5,start:end],'k'); 
