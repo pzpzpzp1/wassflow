@@ -316,11 +316,17 @@ class SaveTrajectory():
         # forward and back
         ts = torch.linspace(0,1,nsteps)
         moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
+        x_trajs = torch.zeros(n, 2, (T-1)*(nsteps-1)+1); trajsc = 0;
+        indices = torch.arange(0,z_target.shape[1])
+        # pdb.set_trace()
         with moviewriter.saving(fig, savedir+'fb_'+savename+'.mp4', dpiv):
             for tt in range(T-1):
+                if tt > 0:
+                    # this permutation is needed to keep x_trajs continuous. otherwise at keyframes, the permutation gets reset.
+                    _fst, indices = MiscTransforms.OT_registration_POT_2D(x_traj_t.detach(), z_target[tt,:,:].detach())
                 integration_times = torch.linspace(tt,tt+1,nsteps).to(device);
                 x_traj_reverse_t = model(z_target[tt+1,:,:], integration_times, reverse=True)
-                x_traj_forward_t = model(z_target[tt,:,:], integration_times, reverse=False)
+                x_traj_forward_t = model(z_target[tt,indices,:], integration_times, reverse=False)
                 x_traj_reverse = x_traj_reverse_t.cpu().detach().numpy()
                 x_traj_forward = x_traj_forward_t.cpu().detach().numpy()
 
@@ -347,17 +353,22 @@ class SaveTrajectory():
                     if ot_type==1:
                         fst = MiscTransforms.OT_registration(fs.detach(), ft.detach())
                     elif ot_type==2:
-                        fst = MiscTransforms.OT_registration_POT_2D(fs.detach(), ft.detach())
+                        fst, indices = MiscTransforms.OT_registration_POT_2D(fs.detach(), ft.detach())
                     
-                    x_traj = (fs*(1-ts[i]) + fst*ts[i]).cpu().detach().numpy()
+                    x_traj_t = (fs*(1-ts[i]) + fst*ts[i])
+                    x_traj = x_traj_t.cpu().detach().numpy()
                     plt.scatter(x_traj[:,0], x_traj[:,1], s=10, alpha=alpha, linewidths=0, c='blue', edgecolors='black')
 
+                    # pdb.set_trace()
+                    x_trajs[:,:,trajsc] = x_traj_t; trajsc+=1
+                    
                     plt.axis('equal')
                     moviewriter.grab_frame()
                     plt.clf()
             moviewriter.finish()
         
         plt.close(fig)
+        return x_trajs
             
 class MiscTransforms():
     def z_t_to_zt(z, t):
@@ -411,7 +422,7 @@ class MiscTransforms():
         n = source.shape[0]; a, b = torch.ones((n,)) / n, torch.ones((n,)) / n
         Wd = ot.emd(a, b, M)
         _vals,indices = Wd.transpose(0,1).max(dim=0)
-        return target[indices,:]
+        return target[indices,:], indices
     
     ## CODE SNIPPET FOR DEBUGGING GEOMLOSS OT_REGISTRATION IF IT BUGS OUT.
     # import Utils; importlib.reload(Utils); from Utils import MiscTransforms
