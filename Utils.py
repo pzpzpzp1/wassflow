@@ -42,6 +42,12 @@ class SpecialLosses():
 #         pdb.set_trace()
         dets = torch.det(jac);
         return 30*nn.Softplus(beta)(-dets);
+    def radialKE(tz,z_dots):
+        x = tz[:,1] 
+        y = tz[:,2]
+        dir = torch.stack((x, y), dim=1)
+        normalizedRadial = dir/dir.norm(p=2,dim=1,keepdim=True)
+        return (z_dots*normalizedRadial).sum(dim=1)**2
     
 class ImageDataset():
     #"""Sample from a distribution defined by an image."""

@@ -79,10 +79,10 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         
         cpt = time.time();
         ## MASS BASED VELOCITY REGULARIZERS
-        fbt = torch.cat((torch.rand(3).to(device), torch.zeros(1).to(device)),0).sort()[0]
+        fbt = torch.cat((torch.rand(5).to(device), torch.zeros(1).to(device)),0).sort()[0]
         tzm = torch.zeros(0,3).to(device)
         for i in range(T-1):
-            subsample_inds = torch.randperm(fullshape[1])[:100];
+            subsample_inds = torch.randperm(fullshape[1])[:30];
             # forward
             z_t = model(z_target_full[i,subsample_inds,:], integration_times = i + fbt)[1:,:,:];
             zz = z_t.reshape(z_t.shape[0]*z_t.shape[1], z_t.shape[2])
@@ -95,6 +95,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
             tzm = torch.cat((tzm, torch.cat((tt,zz),1)),0)
         if detachTZM:
             # faster reg computation and faster backward() step. not a proper gradient though.
+            # turns out to work poorly for higher reg weights. probably don't use this.
             tzm=tzm.detach()
         z_dots, z_jacs, z_accel = model.velfunc.getGrads(tzm);
         n_points = z_dots.shape[0]
@@ -124,6 +125,9 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         z_accel_pad = F.pad(z_accel.view((-1,2)),(0,1))
         kurvature = torch.norm(torch.cross(z_dots_pad, z_accel_pad),p=2,dim=1,keepdim=True)  /  z_dot_norms ** 3
         Kloss = (kurvature - 1)**2
+        # radial kinetic energy
+        radialKE = sl.radialKE(tzm, z_dots)
+        
         ## UNIFORM SPACETIME VELOCITY REGULARIZERS
         tzu = BB.samplerandom(N = 1500, bbscale = 1.1);
         z_dots_u, z_jacs_u, z_accel_u = model.velfunc.getGrads(tzu);
@@ -153,6 +157,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         separate_losses[12,batch] = u_div2loss.mean().item()
         separate_losses[13,batch] = u_aloss.mean().item()
         separate_losses[14,batch] = u_selfadvectloss.mean().item()
+        separate_losses[15,batch] = radialKE.mean().item()
         
         # combine energies
 #         timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
@@ -161,15 +166,16 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
                 + 0 * rigid2loss.mean() \
                 + 0 * vgradloss.mean() \
                 + 0 * KEloss.mean() \
-                + .1 * selfadvectloss.mean() \
-                + .0001 * Aloss.mean() \
+                + .0 * selfadvectloss.mean() \
+                + .0 * Aloss.mean() \
                 + 0 * AVloss.mean() \
-                + .1 * Kloss.mean() \
+                + 0 * Kloss.mean() \
                 - 0* torch.clamp(curl2loss.mean(), 0, .02) \
                 + 0 * u_selfadvectloss.mean() \
-                + .1 * u_div2loss.mean() \
+                + .0 * u_div2loss.mean() \
                 + 0 * u_aloss.mean() \
-                + 0 * u_selfadvectloss.mean() 
+                + 0 * u_selfadvectloss.mean() \
+                + .1 * radialKE.mean() 
 #         - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
         reglosstime = time.time()-cpt
     
