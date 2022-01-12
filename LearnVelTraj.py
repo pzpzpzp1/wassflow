@@ -140,9 +140,6 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         u_div2loss = (z_jacs_u[:,0,0]+z_jacs_u[:,1,1])**2    
         # acceleration
         u_aloss = z_accel_u[:,0]**2 + z_accel_u[:,1]**2
-        # self advection loss
-        selfadvect_u = (torch.bmm(z_jacs_u, z_dots_u.reshape((n_points_u,fullshape[2],1))) + z_accel_u)
-        u_selfadvectloss = selfadvect_u[:,0]**2 + selfadvect_u[:,1]**2
         
         separate_losses[2,batch] = div2loss.mean().item()
         separate_losses[3,batch] = rigid2loss.mean().item()
@@ -156,8 +153,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
         separate_losses[11,batch] = u_selfadvectloss.mean().item()
         separate_losses[12,batch] = u_div2loss.mean().item()
         separate_losses[13,batch] = u_aloss.mean().item()
-        separate_losses[14,batch] = u_selfadvectloss.mean().item()
-        separate_losses[15,batch] = radialKE.mean().item()
+        separate_losses[14,batch] = radialKE.mean().item()
         
         # combine energies
 #         timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
@@ -166,15 +162,14 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
                 + 0 * rigid2loss.mean() \
                 + 0 * vgradloss.mean() \
                 + 0 * KEloss.mean() \
-                + .0 * selfadvectloss.mean() \
+                + .05 * selfadvectloss.mean() \
                 + .0 * Aloss.mean() \
                 + 0 * AVloss.mean() \
                 + 0 * Kloss.mean() \
                 - 0* torch.clamp(curl2loss.mean(), 0, .02) \
-                + 0 * u_selfadvectloss.mean() \
-                + .0 * u_div2loss.mean() \
+                + .0 * u_selfadvectloss.mean() \
+                + .05 * u_div2loss.mean() \
                 + 0 * u_aloss.mean() \
-                + 0 * u_selfadvectloss.mean() \
                 + .1 * radialKE.mean() 
 #         - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
         reglosstime = time.time()-cpt
@@ -264,7 +259,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
     
     st.save_losses(losses, separate_losses, outfolder=outname, maxcap=10000)
     
-    st.save_trajectory(model, z_target_full, savedir=outname, savename='final', nsteps=40, dpiv=400, n=1000)
+    st.save_trajectory(model, z_target_full, savedir=outname, savename='final', nsteps=20, dpiv=400, n=1000)
     
     return model, losses, separate_losses, lrs, n_subs, separate_times
 

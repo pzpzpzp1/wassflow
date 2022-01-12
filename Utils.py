@@ -1,13 +1,9 @@
-import math
-import numpy as np, math, gc
+import numpy as np, gc
 from IPython.display import clear_output
-import pdb
-import time
+import pdb, time, matplotlib, math
 import matplotlib.pyplot as plt
-import matplotlib
 import matplotlib.animation
-import torch
-import torchvision
+import torch, torchvision, ot
 from torch import Tensor, nn
 from torch.nn  import functional as F 
 from torch.autograd import Variable
@@ -256,7 +252,7 @@ class SaveTrajectory():
         ax2.set_ylabel('loss') 
         plt.savefig(outfolder + savename); 
     
-    def save_trajectory(model, z_target_full, savedir='results/outcache/', savename = '', nsteps=20, dpiv=100, n=4000):
+    def save_trajectory(model, z_target_full, savedir='results/outcache/', savename = '', nsteps=20, dpiv=100, n=4000, alpha=.5, ot_type=2):
         
         # save model
         if not os.path.exists(savedir+'models/'):
@@ -286,13 +282,13 @@ class SaveTrajectory():
         with moviewriter.saving(fig, savedir+'forward_'+savename+'.mp4', dpiv):
             for i in range(nsteps):
                 for t in range(T):
-                    plt.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c='green', edgecolors='black')
+                    plt.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=alpha, linewidths=0, c='green', edgecolors='black')
                 x_traj = x_traj_forward
 
                 # plot velocities
                 z_dots_d = model.velfunc.get_z_dot(z_sample[:,0]*0.0 + integration_times[i], z_sample[:,1:]).cpu().detach().numpy();
                 plt.quiver(z_sample_d[:,1], z_sample_d[:,2], z_dots_d[:,0], z_dots_d[:,1])
-                plt.scatter(x_traj[i,:,0], x_traj[i,:,1], s=10, alpha=.5, linewidths=0, c='blue', edgecolors='black')
+                plt.scatter(x_traj[i,:,0], x_traj[i,:,1], s=10, alpha=alpha, linewidths=0, c='blue', edgecolors='black')
                 
                 plt.axis('equal')
                 moviewriter.grab_frame()
@@ -304,13 +300,13 @@ class SaveTrajectory():
         with moviewriter.saving(fig, savedir+'rev_'+savename+'.mp4', dpiv):
             for i in range(nsteps):
                 for t in range(T):
-                    plt.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c='green', edgecolors='black')
+                    plt.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=alpha, linewidths=0, c='green', edgecolors='black')
                 x_traj = x_traj_reverse
 
                 # plot velocities
                 z_dots_d = model.velfunc.get_z_dot(z_sample[:,0]*0.0 + integration_times[(nsteps-1)-i], z_sample[:,1:]).cpu().detach().numpy();
                 plt.quiver(z_sample_d[:,1], z_sample_d[:,2], -z_dots_d[:,0], -z_dots_d[:,1])
-                plt.scatter(x_traj[i,:,0], x_traj[i,:,1], s=10, alpha=.5, linewidths=0, c='blue', edgecolors='black')
+                plt.scatter(x_traj[i,:,0], x_traj[i,:,1], s=10, alpha=alpha, linewidths=0, c='blue', edgecolors='black')
                 
                 plt.axis('equal')
                 moviewriter.grab_frame()
@@ -335,22 +331,26 @@ class SaveTrajectory():
 
                     # ground truth keyframes
                     for t in range(T):
-                        plt.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=.5, linewidths=0, c='green', edgecolors='black')
-
-                    # forward and backwards separately
-                    fsp = fs.cpu().detach().numpy()
-                    ftp = ft.cpu().detach().numpy()
-                    plt.scatter(fsp[:,0], fsp[:,1], s=10, alpha=.5, linewidths=0, c='yellow', edgecolors='black')
-                    plt.scatter(ftp[:,0], ftp[:,1], s=10, alpha=.5, linewidths=0, c='orange', edgecolors='black')
+                        plt.scatter(z_target.cpu().detach().numpy()[t,:,0], z_target.cpu().detach().numpy()[t,:,1], s=10, alpha=alpha, linewidths=0, c='green', edgecolors='black')
 
                     # plot velocities
                     z_dots_d = model.velfunc.get_z_dot(z_sample[:,0]*0.0 + integration_times[i], z_sample[:,1:]).cpu().detach().numpy()
-                    plt.quiver(z_sample_d[:,1], z_sample_d[:,2], z_dots_d[:,0], z_dots_d[:,1])
+                    plt.quiver(z_sample_d[:,1], z_sample_d[:,2], z_dots_d[:,0], z_dots_d[:,1], lw=.01)
+                        
+                    # forward and backwards separately
+                    fsp = fs.cpu().detach().numpy()
+                    ftp = ft.cpu().detach().numpy()
+                    plt.scatter(fsp[:,0], fsp[:,1], s=10, alpha=alpha, linewidths=0, c='yellow', edgecolors='black')
+                    plt.scatter(ftp[:,0], ftp[:,1], s=10, alpha=alpha, linewidths=0, c='orange', edgecolors='black')
 
                     # W2 barycenter combination
-                    fst = MiscTransforms.OT_registration(fs.detach(), ft.detach())
+                    if ot_type==1:
+                        fst = MiscTransforms.OT_registration(fs.detach(), ft.detach())
+                    elif ot_type==2:
+                        fst = MiscTransforms.OT_registration_POT_2D(fs.detach(), ft.detach())
+                    
                     x_traj = (fs*(1-ts[i]) + fst*ts[i]).cpu().detach().numpy()
-                    plt.scatter(x_traj[:,0], x_traj[:,1], s=10, alpha=.5, linewidths=0, c='blue', edgecolors='black')
+                    plt.scatter(x_traj[:,0], x_traj[:,1], s=10, alpha=alpha, linewidths=0, c='blue', edgecolors='black')
 
                     plt.axis('equal')
                     moviewriter.grab_frame()
@@ -375,7 +375,7 @@ class MiscTransforms():
 
     def OT_registration(source, target):
         # pdb.set_trace()
-        Loss = SamplesLoss("sinkhorn", p=2, blur=0.001)
+        Loss = SamplesLoss("sinkhorn", p=2, blur=0.001, debias = False)
         x = source
         y = target
         a = source[:,0]*0.0 + 1.0/source.shape[0]
@@ -390,20 +390,30 @@ class MiscTransforms():
 
         nits = 5
         for it in range(nits):
-            # wasserstein_zy = Loss(a, z, b, y)
-            wasserstein_zy = Loss(z, y)
+            wasserstein_zy = Loss(a, z, b, y)
+            # wasserstein_zy = Loss(z, y)
             [grad_z] = torch.autograd.grad(wasserstein_zy, [z])
             z -= grad_z / a[:, None]  # Apply the regularized Brenier map
+            
+            # print("W2 dist", wasserstein_zy.item())
+        # wasserstein_zy = Loss(a, z, b, y)
+        # [grad_z] = torch.autograd.grad(wasserstein_zy, [z])
         
         if (z.abs()>10).any().item():
             # ot registration is unstable and overshot.
             dic = {"source":source,"target":target}
             torch.save(dic,"otdebug.tar")
             print("SAVED OT REGISTRATION ERROR")
-        
-        return z
+        return z #, grad_z
     
-    ## CODE SNIPPET FOR DEBUGGING OT REGISTRATION IF IT BUGS OUT.
+    def OT_registration_POT_2D(source, target):
+        M=ot.dist(source,target); M/=M.max()
+        n = source.shape[0]; a, b = torch.ones((n,)) / n, torch.ones((n,)) / n
+        Wd = ot.emd(a, b, M)
+        _vals,indices = Wd.transpose(0,1).max(dim=0)
+        return target[indices,:]
+    
+    ## CODE SNIPPET FOR DEBUGGING GEOMLOSS OT_REGISTRATION IF IT BUGS OUT.
     # import Utils; importlib.reload(Utils); from Utils import MiscTransforms
     # dic = torch.load("otdebug.tar");
     # fs = dic["source"]
