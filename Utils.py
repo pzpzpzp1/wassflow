@@ -368,7 +368,8 @@ class MiscTransforms():
         return zt
 
     def OT_registration(source, target):
-        Loss = SamplesLoss("sinkhorn", p=2, blur=0.00001)
+        # pdb.set_trace()
+        Loss = SamplesLoss("sinkhorn", p=2, blur=0.001)
         x = source
         y = target
         a = source[:,0]*0.0 + 1.0/source.shape[0]
@@ -381,11 +382,30 @@ class MiscTransforms():
         if use_cuda:
             torch.cuda.synchronize()
 
-        nits = 10
+        nits = 5
         for it in range(nits):
             # wasserstein_zy = Loss(a, z, b, y)
             wasserstein_zy = Loss(z, y)
             [grad_z] = torch.autograd.grad(wasserstein_zy, [z])
             z -= grad_z / a[:, None]  # Apply the regularized Brenier map
         
+        if (z.abs()>10).any().item():
+            # ot registration is unstable and overshot.
+            dic = {"source":source,"target":target}
+            torch.save(dic,"otdebug.tar")
+            print("SAVED OT REGISTRATION ERROR")
+        
         return z
+    
+    ## CODE SNIPPET FOR DEBUGGING OT REGISTRATION IF IT BUGS OUT.
+    # import Utils; importlib.reload(Utils); from Utils import MiscTransforms
+    # dic = torch.load("otdebug.tar");
+    # fs = dic["source"]
+    # ft = dic["target"]
+    # fsp = fs.detach().cpu().numpy()
+    # ftp = ft.detach().cpu().numpy()
+    # plt.scatter(fsp[:,0], fsp[:,1], s=10, alpha=.5, linewidths=0, c='red', edgecolors='black')
+    # plt.scatter(ftp[:,0], ftp[:,1], s=10, alpha=.5, linewidths=0, c='green', edgecolors='black')
+    # z = MiscTransforms.OT_registration(fs,ft)
+    # zp = z.detach().cpu().numpy()
+    # plt.scatter(zp[:,0], zp[:,1], s=10, alpha=.5, linewidths=0, c='blue', edgecolors='black')

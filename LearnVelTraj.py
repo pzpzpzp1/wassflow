@@ -14,7 +14,7 @@ import os
 from tqdm import tqdm
 # import tensorflow as tf
 
-def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=FfjordModel(), outname = 'results/outcache/', visualize=False, sqrtfitloss=True):
+def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=FfjordModel(), outname = 'results/outcache/', visualize=False, sqrtfitloss=True, detachTZM = True):
     z_target_full, __ = ImageDataset.normalize_samples(z_target_full) # normalize to fit in [0,1] box.
     my_loss_f = SamplesLoss("sinkhorn", p=2, blur=0.00001)
     if not os.path.exists(outname):
@@ -25,7 +25,7 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
     if n_subsample > max_n_subsample:
         n_subsample = max_n_subsample
     currlr = 1e-4;
-    stepsperbatch=50
+    stepsperbatch=5
     optimizer = torch.optim.Adam(list(model.parameters()), lr=currlr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min',factor=.5,patience=1,min_lr=1e-7)
     
@@ -93,6 +93,9 @@ def learn_vel_trajectory(z_target_full, n_iters = 10, n_subsample = 100, model=F
             zz = z_t.reshape(z_t.shape[0]*z_t.shape[1], z_t.shape[2])
             tt = fbt[1:].repeat_interleave(z_t.shape[1]).reshape((-1,1))
             tzm = torch.cat((tzm, torch.cat((tt,zz),1)),0)
+        if detachTZM:
+            # faster reg computation and faster backward() step. not a proper gradient though.
+            tzm=tzm.detach()
         z_dots, z_jacs, z_accel = model.velfunc.getGrads(tzm);
         n_points = z_dots.shape[0]
         
