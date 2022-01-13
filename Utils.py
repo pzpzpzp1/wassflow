@@ -39,6 +39,32 @@ class SpecialLosses():
         dir = tz[:,1:]
         normalizedRadial = dir/dir.norm(p=2, dim=1, keepdim=True)
         return (z_dots*normalizedRadial).sum(dim=1)**2
+    
+    def jac_to_losses(z_jacs):
+        dim = z_jacs.shape[1]
+        N = z_jacs.shape[0]
+        
+        # divergence squared
+        div2loss = torch.zeros(N).to(device)
+        for i in range(dim):
+            div2loss += z_jacs[:, i, i]
+        div2loss = div2loss**2
+        # square norm of curl
+        curl2loss = torch.norm(z_jacs - z_jacs.transpose(1,2),p='fro',dim=(1,2))**2/2
+        
+        # rigid motion: x(t) -> e^[wt] x0 + kt.
+        # v = x_dot = [w]x0+k; dvdx = [w].
+        # ==> skew symmetric velocity gradient is rigid.
+        # if J is displacement gradient, F=J+I is the deformation gradient,
+        # then F'F-I is the green strain.
+        # Linearizing this with small J results in J+J'
+        rigid2loss = torch.norm(z_jacs + z_jacs.transpose(1,2),p='fro',dim=(1,2))**2/4
+        # v-field gradient loss
+        vgradloss = torch.norm(z_jacs,p='fro',dim=(1,2))**2
+        
+        return div2loss, curl2loss, rigid2loss, vgradloss
+        
+        
 
 
 class ImageDataset():
@@ -427,6 +453,7 @@ class SaveTrajectory():
                     trajsc += 1
 
                     ax.axis('equal')
+                    plt.axis('equal')
                     ax.set(xlim=(emic[0].item(), emac[0].item()), ylim=(emic[1].item(), emac[1].item()))
                     plt.axis('off')
                     moviewriter.grab_frame()

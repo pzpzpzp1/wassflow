@@ -117,40 +117,29 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
             # faster reg computation and faster backward() step.
             # not a proper gradient though.
             tzm = tzm.detach()
-        z_dots, z_jacs, z_accel = model.velfunc.getGrads(tzm)
+        z_dots, z_jacs, z_accel, z_jerk = model.velfunc.getGrads(tzm, getJerk = True)
         n_points = z_dots.shape[0]
 
-        # divergence squared
-        div2loss = (z_jacs[:, 0, 0]+z_jacs[:, 1, 1])**2
-        # square norm of curl
-        curl2loss = (z_jacs[:, 0, 1]-z_jacs[:, 1, 0])**2
-        # rigid motion: x(t) -> e^[wt] x0 + kt.
-        # v = x_dot = [w]x0+k; dvdx = [w].
-        # ==> skew symmetric velocity gradient is rigid.
-        # if J is displacement gradient, F=J+I is the deformation gradient,
-        # then F'F-I is the green strain.
-        # Linearizing this with small J results in J+J'
-        rigid2loss = ((z_jacs[:, 0, 1] + z_jacs[:, 1, 0])**2 / 2 +
-                      (z_jacs[:, 0, 0])**2 + (z_jacs[:, 1, 1])**2)
-        # v-field gradient loss
-        vgradloss = (z_jacs[:, 0, 0]**2 + z_jacs[:, 1, 1]**2 +
-                     z_jacs[:, 0, 1]**2 + z_jacs[:, 1, 0]**2)
+        # div, curl, rigid, grad
+        div2loss, curl2loss, rigid2loss, vgradloss = sl.jac_to_losses(z_jacs)
         # kinetic energy loss
-        KEloss = z_dots[:, 0]**2 + z_dots[:, 1]**2
-        # accel loss
-        Aloss = z_accel[:, 0]**2 + z_accel[:, 1]**2
-        # AV loss. (accel paralell to veloc)
         z_dot_norms = torch.norm(z_dots, p=2, dim=1, keepdim=True)
+        KEloss = z_dot_norms[:,0]**2
+        # accel loss
+        Aloss = torch.norm(z_accel,p=2,dim=1)**2 
+        # jerk loss
+        jerkloss = torch.norm(z_jerk,p=2,dim=1)**2 
+        # AV loss. (accel paralell to veloc)
         accel_in_v_dir = torch.bmm(
-            z_dots.view(-1, 1, 2), z_accel).view(-1, 1) / z_dot_norms
+            z_dots.view(-1, 1, dim), z_accel).view(-1, 1) / z_dot_norms
         AVloss = accel_in_v_dir ** 2
         # self advection loss
         selfadvect = torch.bmm(
-            z_jacs, z_dots.reshape(n_points, fullshape[2], 1)) + z_accel
-        selfadvectloss = selfadvect[:, 0]**2 + selfadvect[:, 1]**2
+            z_jacs, z_dots.reshape(n_points, dim, 1)) + z_accel
+        selfadvectloss = torch.norm(selfadvect,p=2,dim=1)**2 
         # Kurvature loss.
         z_dots_pad = F.pad(z_dots, (0, 1))
-        z_accel_pad = F.pad(z_accel.view(-1, 2), (0, 1))
+        z_accel_pad = F.pad(z_accel.view(-1, dim), (0, 1))
         kurvature = torch.norm(
             torch.cross(z_dots_pad, z_accel_pad), p=2, dim=1,
             keepdim=True) / z_dot_norms ** 3
@@ -160,25 +149,27 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
 
         # UNIFORM SPACETIME VELOCITY REGULARIZERS
         tzu = BB.samplerandom(N=1500, bbscale=1.1)
-        z_dots_u, z_jacs_u, z_accel_u = model.velfunc.getGrads(tzu)
+        z_dots_u, z_jacs_u, z_accel_u,z_jerk_u = model.velfunc.getGrads(tzu, getJerk = False)
         n_points_u = z_dots_u.shape[0]
 
+        # global div, curl, rigid, grad
+        u_div2loss, u_curl2loss, u_rigid2loss, u_vgradloss = sl.jac_to_losses(z_jacs_u)
         # global self advection loss
         selfadvect_u = torch.bmm(
-            z_jacs_u, z_dots_u.reshape(n_points_u, fullshape[2], 1)
+            z_jacs_u, z_dots_u.reshape(n_points_u, dim, 1)
         ) + z_accel_u
-        u_selfadvectloss = selfadvect_u[:, 0]**2 + selfadvect_u[:, 1]**2
-        # divergence squared
-        u_div2loss = (z_jacs_u[:, 0, 0]+z_jacs_u[:, 1, 1])**2
+        u_selfadvectloss = torch.norm(selfadvect_u,p=2,dim=1)**2 
         # acceleration
-        u_aloss = z_accel_u[:, 0]**2 + z_accel_u[:, 1]**2
+        u_aloss = torch.norm(z_accel_u,p=2,dim=1)**2 
+        # jerk loss
+        u_jerkloss = torch.norm(z_jerk_u,p=2,dim=1)**2 
 
         separate_losses[2, batch] = div2loss.mean().item()
         separate_losses[3, batch] = rigid2loss.mean().item()
         separate_losses[4, batch] = vgradloss.mean().item()
         separate_losses[5, batch] = KEloss.mean().item()
         separate_losses[6, batch] = selfadvectloss.mean().item()
-        separate_losses[7, batch] = Aloss.mean().item()
+        separate_losses[7, batch] = Aloss.mean().item() # dampens wiggling. but also dampens rotations.
         separate_losses[8, batch] = AVloss.mean().item()
         separate_losses[9, batch] = Kloss.mean().item()
         separate_losses[10, batch] = curl2loss.mean().item()
@@ -186,6 +177,7 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
         separate_losses[12, batch] = u_div2loss.mean().item()
         separate_losses[13, batch] = u_aloss.mean().item()
         separate_losses[14, batch] = radialKE.mean().item()
+        separate_losses[15, batch] = jerkloss.mean().item()
 
         # combine energies
         # timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
@@ -196,13 +188,14 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
             + 0 * KEloss.mean() \
             + .001 * selfadvectloss.mean() \
             + .00 * Aloss.mean() \
-            + .01 * AVloss.mean() \
+            + .00 * AVloss.mean() \
             + .15 * Kloss.mean() \
             - 0 * torch.clamp(curl2loss.mean(), 0, .02) \
             + .0 * u_selfadvectloss.mean() \
             + .01 * u_div2loss.mean() \
             + 0 * u_aloss.mean() \
-            + .0 * radialKE.mean()
+            + .0 * radialKE.mean() \
+            + .01 * jerkloss.mean()
         # - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
         reglosstime = time.time() - cpt
 
@@ -237,6 +230,9 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
                 currlr = g['lr']
 
             if visualize:
+                if dim!=2:
+                    raise Exception("no viz for 3d yet.")
+                
                 f, (ax1, ax2) = plt.subplots(1, 2)
                 z_t = model(z_target[0],
                             integration_times=torch.linspace(

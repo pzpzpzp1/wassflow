@@ -1,6 +1,6 @@
 from Utils import InputMapping
 
-import torch
+import torch, pdb
 from torch import nn
 from torchdiffeq import odeint_adjoint as odeint
 
@@ -39,25 +39,33 @@ class velocMLP(nn.Module):
         z_dot = self.f(tz)
         return z_dot
 
-    def getGrads(self, tz):
+    def getGrads(self, tz, getJerk = False):
         """
         tz: N (d+1)
         out: N d
         jacs:
         """
         tz.requires_grad_(True)
-        dv = tz.shape[1]-1 # dimension
+        N = tz.shape[0]
+        dim = tz.shape[1]-1 # dimension
         batchsize = tz.shape[0]
         z = tz[:, 1:]
         t = tz[:, :1]
         out = self.get_z_dot(t, z)
 
-        jacobians = torch.zeros(batchsize, dv, dv+1).to(tz)
-        for i in range(dv):
+        jacobians = torch.zeros(batchsize, dim, dim+1).to(tz)
+        for i in range(dim):
             jacobians[:, i, :] = torch.autograd.grad(
                 out[:, i].sum(), tz, create_graph=True)[0]
-
-        return out, jacobians[:, :, 0:dv], jacobians[:, :, dv:]
+        
+        # get Jerk. 3rd time deriv. Promotes constant rotation.
+        Jerk = torch.zeros(N,dim)
+        if getJerk:
+            for i in range(dim):
+                JerkTZ = torch.autograd.grad(jacobians[:, i, dim].sum(), tz, create_graph=True)[0]
+                Jerk[:,i] = JerkTZ[:,dim]
+        
+        return out, jacobians[:, :, 0:dim], jacobians[:, :, dim:], Jerk
 
     def forward(self, t, z):
         """
