@@ -283,7 +283,7 @@ class SaveTrajectory():
 
     def save_trajectory(model, z_target_full, savedir='results/outcache/',
                         savename='', nsteps=20, dpiv=100, n=4000, alpha=.5,
-                        ot_type=2):
+                        ot_type=2, writeTracers = False):
         # save model
         if not os.path.exists(savedir+'models/'):
             os.makedirs(savedir+'models/')
@@ -433,6 +433,42 @@ class SaveTrajectory():
                     plt.clf()
             moviewriter.finish()
 
+        if writeTracers:
+            n = x_trajs.shape[0]
+            d = x_trajs.shape[1]
+            nf = x_trajs.shape[2]
+            nft = torch.linspace(0,1,nf)
+            cs = torch.tensor((.5, .6, 1))
+            cf = torch.tensor((.2, 1, .2))
+            x_trajs_f = x_trajs.transpose(1,2)
+            nanc = torch.zeros(n,1,d)*float("nan")
+            moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
+            with moviewriter.saving(fig, savedir + 'traj_'+savename+'.mp4', dpiv):
+                for tt in range(T):
+                    plt.scatter(
+                        z_target.cpu().detach().numpy()[tt, :, 0],
+                        z_target.cpu().detach().numpy()[tt, :, 1],
+                        s=10, alpha=1, linewidths=0, c='blue', zorder = 2)
+
+                for t in range(0,nf):
+                    if t>0:
+                        # plot tracers
+                        ctt = (cs*(1-nft[t])+cf*nft[t])
+                        ct = (ctt[0].item(),ctt[1].item(),ctt[2].item())
+                        segment_t = x_trajs_f[:,t-1:t+1,:]
+                        testp = torch.cat((segment_t, nanc),dim=1).reshape(-1,d).detach().cpu().numpy()
+                        plt.plot(testp[:,0],testp[:,1],alpha=.3, lw=.5, color = ct, zorder = 1)
+
+                    # plot endpoints
+                    endpoints = x_trajs[:,:,t].detach().cpu().numpy()
+                    scr = plt.scatter(endpoints[:, 0], endpoints[:, 1], s=10,
+                                alpha=1, linewidths=0, color="g", zorder = 2)
+
+                    plt.axis('equal')
+                    moviewriter.grab_frame()
+                    scr.remove()
+            moviewriter.finish()
+            
         plt.close(fig)
         return x_trajs
 

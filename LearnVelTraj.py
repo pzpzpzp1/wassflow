@@ -326,6 +326,6 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
     st.save_losses(losses, separate_losses, outfolder=outname, maxcap=10000)
 
     st.save_trajectory(model, z_target_full, savedir=outname,
-                       savename='final', nsteps=20, dpiv=400, n=1000)
+                       savename='final', nsteps=20, dpiv=400, n=1000, writeTracers=True)
 
     return model, losses, separate_losses, lrs, n_subs, separate_times

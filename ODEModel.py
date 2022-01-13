@@ -18,6 +18,7 @@ class velocMLP(nn.Module):
         net = []
         imap = InputMapping(in_features, n_freq, sigma=sigmac,
                             tdiv=tdiv, incrementalMask=incrementalMask)
+        self.imap = imap
         net.append(imap)
         net.append(nn.Linear(imap.d_out, hidden_features))
         for i in range(hidden_layers):
