@@ -15,18 +15,17 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 def ezshow(dat, col='green'):
-    plt.scatter(dat.detach().numpy()[:, 0], dat.detach().numpy()[
-                :, 1], s=10, alpha=0.5, linewidths=0, c=col)
+    ax = plt.gca()
+    datp = dat.detach().cpu().numpy()
+    d = datp.shape[1]
+    if d == 2:
+        plt.scatter(datp[:, 0], datp[:, 1], s=10, alpha=0.5, linewidths=0, c=col)
+    elif d==3:
+        ax.scatter(datp[:, 0], datp[:, 1], datp[:, 2], alpha=1, linewidths=0, c=col)
+    else:
+        # raise NameError("asdf")
+        raise Exception("incorrect dimension")
     plt.axis('equal')
-
-
-class Sine(nn.Module):
-    def __init(self):
-        super().__init__()
-
-    def forward(self, input):
-        return torch.sin(input)
-
 
 class SpecialLosses():
     def __init(self):
@@ -35,17 +34,9 @@ class SpecialLosses():
     def grad_to_jac(grad):
         dim = grad.shape[1]
         return grad[:, 0:dim, 0:dim]
-
-    # at 0 input, output is .006.
-    # We do want it to be stricly positive. not just 0 det.
-    def jacdetloss(jac, beta=100):
-        dets = torch.det(jac)
-        return 30*nn.Softplus(beta)(-dets)
-
+    
     def radialKE(tz, z_dots):
-        x = tz[:, 1]
-        y = tz[:, 2]
-        dir = torch.stack((x, y), dim=1)
+        dir = tz[:,1:]
         normalizedRadial = dir/dir.norm(p=2, dim=1, keepdim=True)
         return (z_dots*normalizedRadial).sum(dim=1)**2
 
@@ -164,8 +155,6 @@ class BoundingBox():
 
     def sampleuniform(self, t_N=30, x_N=10, y_N=11, z_N=12, bbscale=1.1):
         [eLL, eTR] = self.extendedBB(bbscale)
-
-        # pdb.set_trace()
         
         tspace = torch.linspace(0, self.T-1, t_N)
         xspace = torch.linspace(eLL[0], eTR[0], x_N)
@@ -195,16 +184,6 @@ class BoundingBox():
         z_sample = deltx*z_sample + torch.cat((TC, self.C))
 
         return z_sample
-
-    def samplecustom(N=10000):
-        # sample [-1.1,1.1] x [-1.1,1.1] x [0,1]
-        #         pdb.set_trace()
-        z_sample = torch.rand(N, 3).to(device)
-        z_sample[:, 0:2] -= .5
-        z_sample[:, 0:2] *= 2.2
-
-        return z_sample
-
 
 class InputMapping(nn.Module):
     """Fourier features mapping"""
@@ -292,6 +271,9 @@ class SaveTrajectory():
     def save_trajectory(model, z_target_full, savedir='results/outcache/',
                         savename='', nsteps=20, dpiv=100, n=4000, alpha=.5,
                         ot_type=2, writeTracers = False):
+        if z_target_full.shape[1]!=2:
+            raise Exception("3d save trajectory not handled yet")
+        
         # save model
         if not os.path.exists(savedir+'models/'):
             os.makedirs(savedir+'models/')
@@ -427,9 +409,11 @@ class SaveTrajectory():
 
                     # W2 barycenter combination
                     if ot_type == 1:
+                        # this registration isn't 1-1 on point clouds. don't know why currently.
                         fst = MiscTransforms.OT_registration(
                             fs.detach(), ft.detach())
                     elif ot_type == 2:
+                        # full linear program version of OT. slightly slower than geomloss but frankly not that slow compared to other steps in the pipeline.
                         fst, indices = MiscTransforms.OT_registration_POT_2D(
                             fs.detach(), ft.detach())
 
@@ -526,7 +510,8 @@ class MiscTransforms():
         return zt
 
     def OT_registration(source, target):
-        # pdb.set_trace()
+        raise Exception("deprecated inexact OT_registration.")
+        
         Loss = SamplesLoss("sinkhorn", p=2, blur=0.001, debias=False)
         x = source
         y = target
@@ -554,6 +539,7 @@ class MiscTransforms():
             print("SAVED OT REGISTRATION ERROR")
         return z  # , grad_z
 
+    # should work for 3d too actually.
     def OT_registration_POT_2D(source, target):
         M = ot.dist(source, target)
         M /= M.max()
