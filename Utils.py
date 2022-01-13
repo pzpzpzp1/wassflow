@@ -6,7 +6,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.animation
 import torch
-import ot
+import ot, pdb
 from torch import nn
 
 
@@ -141,24 +141,32 @@ class BoundingBox():
     # smps = BB.sampleuniform(t_N = 30, x_N = 10, y_N = 11, z_N=12, bbscale = 1.1);
     # smps = BB.samplerandom(N = 10000, bbscale = 1.1);
 
-    def __init__(self, z_target_full):
+    def __init__(self, z_target_full, square = False):
         self.T = z_target_full.shape[0]
         self.dim = z_target_full.shape[2]
-
+        
         # min corner, max corner, center
-        self.mic = z_target_full.reshape(-1, self.dim).min(0)[0]
-        self.mac = z_target_full.reshape(-1, self.dim).max(0)[0]
+        self.mic = z_target_full.reshape(-1, self.dim).min(0)[0].detach()
+        self.mac = z_target_full.reshape(-1, self.dim).max(0)[0].detach()
         self.C = (self.mic+self.mac)/2
 
-    def extendedBB(self, bbscale):
+        if square:
+            # min corner, max corner, center
+            self.mac = self.C + (self.mac - self.C).max()
+            self.mic = self.C - (self.mac - self.C).max()
+            
+    def extendedBB(self, bbscale=1.1):
         # extended bounding box.
         emic = (self.mic-self.C)*bbscale+self.C
         emac = (self.mac-self.C)*bbscale+self.C
+                
         return emic, emac
 
     def sampleuniform(self, t_N=30, x_N=10, y_N=11, z_N=12, bbscale=1.1):
         [eLL, eTR] = self.extendedBB(bbscale)
 
+        # pdb.set_trace()
+        
         tspace = torch.linspace(0, self.T-1, t_N)
         xspace = torch.linspace(eLL[0], eTR[0], x_N)
         yspace = torch.linspace(eLL[1], eTR[1], y_N)
@@ -295,10 +303,6 @@ class SaveTrajectory():
         subsample_inds = torch.randperm(z_target_full.shape[1])[:n]
         z_target = z_target_full[:, subsample_inds, :]
 
-        BB = BoundingBox(z_target)
-        z_sample = BB.sampleuniform(t_N=1, x_N=20, y_N=20)
-        z_sample_d = z_sample.cpu().detach().numpy()
-
         T = z_target.shape[0]
         integration_times = torch.linspace(0, T-1, nsteps).to(device)
         x_traj_reverse_t = model(
@@ -308,9 +312,15 @@ class SaveTrajectory():
         x_traj_reverse = x_traj_reverse_t.cpu().detach().numpy()
         x_traj_forward = x_traj_forward_t.cpu().detach().numpy()
 
+        allpoints = torch.cat((x_traj_reverse_t,x_traj_forward_t,z_target),dim=0).detach() #.cpu().detach().numpy()
+        BB = BoundingBox(allpoints.detach(), square = False)
+        emic,emac = BB.extendedBB(1.1)
+        z_sample = BB.sampleuniform(t_N=1, x_N=20, y_N=20)
+        z_sample_d = z_sample.cpu().detach().numpy()
+        
         # forward
         moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
-        fig = plt.figure()
+        fig, (ax) = plt.subplots(1,1)
         with moviewriter.saving(fig, savedir+'forward_'+savename+'.mp4', dpiv):
             for i in range(nsteps):
                 for t in range(T):
@@ -331,7 +341,9 @@ class SaveTrajectory():
                             alpha=alpha, linewidths=0, c='blue',
                             edgecolors='black')
 
-                plt.axis('equal')
+                ax.axis('equal')
+                ax.set(xlim=(emic[0].item(), emac[0].item()), ylim=(emic[1].item(), emac[1].item()))
+                plt.axis('off')
                 moviewriter.grab_frame()
                 plt.clf()
             moviewriter.finish()
@@ -358,7 +370,9 @@ class SaveTrajectory():
                             alpha=alpha, linewidths=0, c='blue',
                             edgecolors='black')
 
-                plt.axis('equal')
+                ax.axis('equal')
+                ax.set(xlim=(emic[0].item(), emac[0].item()), ylim=(emic[1].item(), emac[1].item()))
+                plt.axis('off')
                 moviewriter.grab_frame()
                 plt.clf()
             moviewriter.finish()
@@ -369,7 +383,6 @@ class SaveTrajectory():
         x_trajs = torch.zeros(n, 2, (T-1)*(nsteps-1)+1)
         trajsc = 0
         indices = torch.arange(0, z_target.shape[1])
-        # pdb.set_trace()
         with moviewriter.saving(fig, savedir+'fb_'+savename+'.mp4', dpiv):
             for tt in range(T-1):
                 if tt > 0:
@@ -424,16 +437,19 @@ class SaveTrajectory():
                     plt.scatter(x_traj[:, 0], x_traj[:, 1], s=10, alpha=alpha,
                                 linewidths=0, c='blue', edgecolors='black')
 
-                    # pdb.set_trace()
                     x_trajs[:, :, trajsc] = x_traj_t
                     trajsc += 1
 
-                    plt.axis('equal')
+                    ax.axis('equal')
+                    ax.set(xlim=(emic[0].item(), emac[0].item()), ylim=(emic[1].item(), emac[1].item()))
+                    plt.axis('off')
                     moviewriter.grab_frame()
                     plt.clf()
             moviewriter.finish()
-
+        plt.close(fig)
+        
         if writeTracers:
+            fig, (ax) = plt.subplots(1,1)
             n = x_trajs.shape[0]
             d = x_trajs.shape[1]
             nf = x_trajs.shape[2]
@@ -443,6 +459,9 @@ class SaveTrajectory():
             x_trajs_f = x_trajs.transpose(1,2)
             nanc = torch.zeros(n,1,d)*float("nan")
             moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
+            ax.axis('equal')
+            ax.set(xlim=(emic[0].item(), emac[0].item()), ylim=(emic[1].item(), emac[1].item()))
+            ax.axis('off')
             with moviewriter.saving(fig, savedir + 'traj_'+savename+'.mp4', dpiv):
                 for tt in range(T):
                     plt.scatter(
@@ -464,12 +483,11 @@ class SaveTrajectory():
                     scr = plt.scatter(endpoints[:, 0], endpoints[:, 1], s=10,
                                 alpha=1, linewidths=0, color="g", zorder = 2)
 
-                    plt.axis('equal')
                     moviewriter.grab_frame()
                     scr.remove()
             moviewriter.finish()
+            plt.close(fig)
             
-        plt.close(fig)
         return x_trajs
 
 
@@ -508,10 +526,6 @@ class MiscTransforms():
             # wasserstein_zy = Loss(z, y)
             [grad_z] = torch.autograd.grad(wasserstein_zy, [z])
             z -= grad_z / a[:, None]  # Apply the regularized Brenier map
-
-            # print("W2 dist", wasserstein_zy.item())
-        # wasserstein_zy = Loss(a, z, b, y)
-        # [grad_z] = torch.autograd.grad(wasserstein_zy, [z])
 
         if (z.abs() > 10).any().item():
             # ot registration is unstable and overshot.
