@@ -46,7 +46,7 @@ class velocMLP(nn.Module):
         jacs:
         """
         tz.requires_grad_(True)
-        dv = tz.shape[1]-1
+        dv = tz.shape[1]-1 # dimension
         batchsize = tz.shape[0]
         z = tz[:, 1:]
         t = tz[:, :1]
@@ -59,36 +59,25 @@ class velocMLP(nn.Module):
 
         return out, jacobians[:, :, 0:dv], jacobians[:, :, dv:]
 
-    def forward(self, t, state):
+    def forward(self, t, z):
         """
-        Calculate the time derivative of z and divergence.
-
+        Calculate the time derivative of z.
         Parameters
         ----------
         t : torch.Tensor
             time
-        state : torch.Tensor
-            Contains z
-
+        z : torch.Tensor
+            state
         Returns
         -------
         z_dot : torch.Tensor
             Time derivative of z.
-        negative_divergence : torch.Tensor
-            Time derivative of the log determinant of the Jacobian.
         """
-        z = state
-
         with torch.set_grad_enabled(True):
             z.requires_grad_(True)
             t.requires_grad_(True)
-
-            # Calculate the time derivative of z.
-            # This is f(z(t), t; \theta) in Eq. 4.
             z_dot = self.get_z_dot(t, z)
-
         return z_dot
-
 
 class FfjordModel(torch.nn.Module):
 
@@ -117,7 +106,7 @@ class FfjordModel(torch.nn.Module):
         self.velfunc = velocMLP(
             ms['in_features'], ms['hidden_features'], ms['hidden_layers'],
             ms['out_features'], 5, ms['n_freq'], 5)
-
+        
         self.load_state_dict(self_dict)
         self = self.to(device)
 
