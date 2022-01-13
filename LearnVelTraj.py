@@ -6,13 +6,13 @@ from Utils import (BoundingBox, ImageDataset, SaveTrajectory as st,
 from geomloss import SamplesLoss
 import numpy as np
 import time
+import pdb
 import matplotlib.pyplot as plt
 import torch
 from torch.nn import functional as F
 
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
 
 def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
                          model=FfjordModel(), outname='results/outcache/',
@@ -22,7 +22,6 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
     my_loss_f = SamplesLoss("sinkhorn", p=2, blur=0.00001)
     if not os.path.exists(outname):
         os.makedirs(outname)
-
     model.to(device)
 
     # more is too slow.
@@ -35,7 +34,6 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, 'min', factor=.5, patience=1, min_lr=1e-7)
 
-    T = z_target_full.shape[0]
     BB = BoundingBox(z_target_full)
 
     separate_losses = np.empty((50, n_iters))
@@ -44,26 +42,28 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
     losses = np.empty((1, n_iters))
     lrs = np.empty((1, n_iters))
     n_subs = np.empty((1, n_iters))
+    
+    fullshape = z_target_full.shape  # [T, n_samples, d]
+    T = fullshape[0]
+    n_total = fullshape[1]
+    dim = fullshape[2]
+    n_subsample = min(n_subsample, n_total)
+    subsample_inds = torch.randperm(n_total)[:n_subsample]
+    
     start = time.time()
     start0 = time.time()
-
-    fullshape = z_target_full.shape  # [T, n_samples, d]
-    n_subsample = min(n_subsample, fullshape[1])
-    subsample_inds = torch.randperm(fullshape[1])[:n_subsample]
-    start = time.time()
-
     for batch in tqdm(range(n_iters)):
         # subsample z_target_full to z_target for loss computation
         z_target = torch.zeros(
-            [fullshape[0], n_subsample, fullshape[2]]).to(z_target_full)
-        for i in range(fullshape[0]):
-            subsample_inds = torch.randperm(fullshape[1])[:n_subsample]
+            [T, n_subsample, dim]).to(z_target_full)
+        for i in range(T):
+            subsample_inds = torch.randperm(n_total)[:n_subsample]
             z_target[i] = z_target_full[i, subsample_inds]
 
         optimizer.zero_grad()
         # FORWARD and BACKWARD fitting loss
         cpt = time.time()
-
+        
         # integrate ODE forward in time
         fitloss = torch.tensor(0.).to(device)
         for t in range(T-1):
@@ -90,30 +90,32 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
         separate_losses[1, batch] = fitlossb
         fitlosstime = time.time() - cpt
 
-        cpt = time.time()
         # MASS BASED VELOCITY REGULARIZERS
-        fbt = torch.cat((torch.rand(5).to(device),
+        cpt = time.time()
+        n_tzm_points = 30
+        n_tzm_times = 5
+        fbt = torch.cat((torch.rand(n_tzm_times).to(device),
                          torch.zeros(1).to(device)), 0).sort()[0]
-        tzm = torch.zeros(0, 3).to(device)
+        tzm = torch.zeros(0, dim+1).to(device)
         for i in range(T-1):
-            subsample_inds = torch.randperm(fullshape[1])[:30]
+            subsample_inds = torch.randperm(n_total)[:n_tzm_points]
             # forward
+            tf = i + fbt
             z_t = model(z_target_full[i, subsample_inds],
-                        integration_times=i + fbt)[1:]
-            zz = z_t.reshape(z_t.shape[0]*z_t.shape[1], z_t.shape[2])
-            tt = fbt[1:].repeat_interleave(z_t.shape[1]).reshape(-1, 1)
+                        integration_times=tf)[1:]
+            zz = z_t.reshape(n_tzm_times*n_tzm_points, dim)
+            tt = tf[1:].repeat_interleave(n_tzm_points).reshape(-1, 1)
             tzm = torch.cat([tzm, torch.cat([tt, zz], 1)], 0)
             # backward
+            tb = (i + 1) - fbt
             z_t = model(z_target_full[i+1, subsample_inds],
-                        integration_times=(i + 1) - fbt)[1:]
-            zz = z_t.reshape(z_t.shape[0]*z_t.shape[1], z_t.shape[2])
-            tt = fbt[1:].repeat_interleave(z_t.shape[1]).reshape(-1, 1)
+                        integration_times=tb)[1:]
+            zz = z_t.reshape(n_tzm_times*n_tzm_points, dim)
+            tt = tb[1:].repeat_interleave(n_tzm_points).reshape(-1, 1)
             tzm = torch.cat([tzm, torch.cat([tt, zz], 1)], 0)
         if detachTZM:
             # faster reg computation and faster backward() step.
             # not a proper gradient though.
-            # turns out to work poorly for higher reg weights.
-            # probably don't use this.
             tzm = tzm.detach()
         z_dots, z_jacs, z_accel = model.velfunc.getGrads(tzm)
         n_points = z_dots.shape[0]
@@ -188,19 +190,19 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
         # combine energies
         # timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
         # timeIndices = (z_sample[:,0] < ((T-1.)/.001)).detach()
-        regloss = 0 * div2loss.mean() \
+        regloss = .02 * div2loss.mean() \
             + 0 * rigid2loss.mean() \
             + 0 * vgradloss.mean() \
             + 0 * KEloss.mean() \
-            + .05 * selfadvectloss.mean() \
-            + .0 * Aloss.mean() \
-            + 0 * AVloss.mean() \
-            + 0 * Kloss.mean() \
+            + .001 * selfadvectloss.mean() \
+            + .00 * Aloss.mean() \
+            + .01 * AVloss.mean() \
+            + .15 * Kloss.mean() \
             - 0 * torch.clamp(curl2loss.mean(), 0, .02) \
             + .0 * u_selfadvectloss.mean() \
-            + .05 * u_div2loss.mean() \
+            + .01 * u_div2loss.mean() \
             + 0 * u_aloss.mean() \
-            + .1 * radialKE.mean()
+            + .0 * radialKE.mean()
         # - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
         reglosstime = time.time() - cpt
 

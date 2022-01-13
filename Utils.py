@@ -271,7 +271,7 @@ class SaveTrajectory():
     def save_trajectory(model, z_target_full, savedir='results/outcache/',
                         savename='', nsteps=20, dpiv=100, n=4000, alpha=.5,
                         ot_type=2, writeTracers = False):
-        if z_target_full.shape[1]!=2:
+        if z_target_full.shape[2]!=2:
             raise Exception("3d save trajectory not handled yet")
         
         # save model
