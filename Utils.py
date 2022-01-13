@@ -381,6 +381,7 @@ class SaveTrajectory():
         ts = torch.linspace(0, 1, nsteps)
         moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
         x_trajs = torch.zeros(n, 2, (T-1)*(nsteps-1)+1)
+        t_trajs = torch.zeros((T-1)*(nsteps-1)+1)
         trajsc = 0
         indices = torch.arange(0, z_target.shape[1])
         with moviewriter.saving(fig, savedir+'fb_'+savename+'.mp4', dpiv):
@@ -438,6 +439,7 @@ class SaveTrajectory():
                                 linewidths=0, c='blue', edgecolors='black')
 
                     x_trajs[:, :, trajsc] = x_traj_t
+                    t_trajs[trajsc] = integration_times[i]
                     trajsc += 1
 
                     ax.axis('equal')
@@ -450,30 +452,47 @@ class SaveTrajectory():
         
         if writeTracers:
             fig, (ax) = plt.subplots(1,1)
-            n = x_trajs.shape[0]
-            d = x_trajs.shape[1]
-            nf = x_trajs.shape[2]
-            nft = torch.linspace(0,1,nf)
-            cs = torch.tensor((.5, .6, 1))
-            cf = torch.tensor((.2, 1, .2))
-            x_trajs_f = x_trajs.transpose(1,2)
+            n = x_trajs.shape[0] # num particles
+            d = x_trajs.shape[1] # dimension
+            nf = x_trajs.shape[2] # number of frames in full trajectory
+            nft = torch.linspace(0,1,nf) # color tracers
+            nftt = torch.linspace(0,1,T) # color keyframes
+            cs = torch.tensor((.3, .5, 1)) # start color
+            cf = torch.tensor((.2, 1, .2)) # end color
+            x_trajs_f = x_trajs.transpose(1,2) 
             nanc = torch.zeros(n,1,d)*float("nan")
             moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
             ax.axis('equal')
             ax.set(xlim=(emic[0].item(), emac[0].item()), ylim=(emic[1].item(), emac[1].item()))
             ax.axis('off')
+            dullingfactor = .7
             with moviewriter.saving(fig, savedir + 'traj_'+savename+'.mp4', dpiv):
-                for tt in range(T):
-                    plt.scatter(
-                        z_target.cpu().detach().numpy()[tt, :, 0],
-                        z_target.cpu().detach().numpy()[tt, :, 1],
-                        s=10, alpha=1, linewidths=0, c='blue', zorder = 2)
-
+                keyframe_percentage_curr = -1
                 for t in range(0,nf):
+                    ctt = (cs*(1-nft[t])+cf*nft[t])
+                    dctt = (cs*(1-nft[t])+cf*nft[t])*dullingfactor
+                    ct = (ctt[0].item(),ctt[1].item(),ctt[2].item())
+                    dct = (dctt[0].item(),dctt[1].item(),dctt[2].item())
+                    
+                    # plot velocities
+                    z_dots_d = model.velfunc.get_z_dot(
+                        z_sample[:, 0]*0.0 + t_trajs[t],
+                        z_sample[:, 1:]).cpu().detach().numpy()
+                    qvr = plt.quiver(z_sample_d[:, 1], z_sample_d[:, 2],
+                               z_dots_d[:, 0], z_dots_d[:, 1], headwidth= 1, headlength=3, headaxislength=2)
+                    
+                    # plot keyframes as tracers pass by
+                    keyframe_percentage = np.floor(t/(nf-1.)*(T-1))
+                    if keyframe_percentage != keyframe_percentage_curr:
+                        keyframe_percentage_curr = keyframe_percentage
+                        tt = int(keyframe_percentage)
+                        plt.scatter(
+                            z_target.cpu().detach().numpy()[tt, :, 0],
+                            z_target.cpu().detach().numpy()[tt, :, 1],
+                            s=10, alpha=1, linewidths=0, color=dct, zorder = 2)
+                    
                     if t>0:
-                        # plot tracers
-                        ctt = (cs*(1-nft[t])+cf*nft[t])
-                        ct = (ctt[0].item(),ctt[1].item(),ctt[2].item())
+                        # plot tracers. Using the [xy;xy;nan] trick from matlab to plot all segments of a timestep at once. it's faster than a for loop at least.
                         segment_t = x_trajs_f[:,t-1:t+1,:]
                         testp = torch.cat((segment_t, nanc),dim=1).reshape(-1,d).detach().cpu().numpy()
                         plt.plot(testp[:,0],testp[:,1],alpha=.3, lw=.5, color = ct, zorder = 1)
@@ -481,10 +500,11 @@ class SaveTrajectory():
                     # plot endpoints
                     endpoints = x_trajs[:,:,t].detach().cpu().numpy()
                     scr = plt.scatter(endpoints[:, 0], endpoints[:, 1], s=10,
-                                alpha=1, linewidths=0, color="g", zorder = 2)
+                                alpha=1, linewidths=0, color=dct, zorder = 2, edgecolors='k')
 
                     moviewriter.grab_frame()
                     scr.remove()
+                    qvr.remove()
             moviewriter.finish()
             plt.close(fig)
             
