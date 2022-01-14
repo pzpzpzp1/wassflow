@@ -16,7 +16,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
                          model=FfjordModel(), outname='results/outcache/',
-                         visualize=False, sqrtfitloss=True, detachTZM=False, clipnorms = True, lr = 4e-4, clipnorm = 1):
+                         visualize=False, sqrtfitloss=True, detachTZM=False, lr = 4e-4, clipnorm = 1):
     # normalize to fit in [0,1] box.
     z_target_full, __ = ImageDataset.normalize_samples(z_target_full)
     my_loss_f = SamplesLoss("sinkhorn", p=2, blur=0.00001)
@@ -209,8 +209,7 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
 
         cpt = time.time()
         totalloss.backward()
-        if clipnorms:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm = clipnorm)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm = clipnorm)
         optimizer.step()
         model.velfunc.imap.step((batch+1) / n_iters)
         steptime = time.time() - cpt
