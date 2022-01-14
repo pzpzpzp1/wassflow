@@ -248,7 +248,7 @@ class InputMapping(nn.Module):
                 self.mask[0, :] = 1
             else:
                 self.mask[0, 0:int_filled] = 1
-                self.mask[0, int_filled] = remainder
+                # self.mask[0, int_filled] = remainder
 
     def forward(self, xi):
         y = self.B(2*np.pi*xi)

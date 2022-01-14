@@ -16,7 +16,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
                          model=FfjordModel(), outname='results/outcache/',
-                         visualize=False, sqrtfitloss=True, detachTZM=True):
+                         visualize=False, sqrtfitloss=True, detachTZM=False, clipnorms = True, lr = 4e-4, clipnorm = 1):
     # normalize to fit in [0,1] box.
     z_target_full, __ = ImageDataset.normalize_samples(z_target_full)
     my_loss_f = SamplesLoss("sinkhorn", p=2, blur=0.00001)
@@ -28,7 +28,7 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
     # 2000 is enough to get a reasonable capture of the image per iter.
     max_n_subsample = 1100
     n_subsample = min(n_subsample, max_n_subsample)
-    currlr = 1e-4
+    currlr = lr
     stepsperbatch = 50
     optimizer = torch.optim.Adam(model.parameters(), lr=currlr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
@@ -182,7 +182,7 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
         # combine energies
         # timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
         # timeIndices = (z_sample[:,0] < ((T-1.)/.001)).detach()
-        regloss = .02 * div2loss.mean() \
+        regloss = .05 * div2loss.mean() \
             + 0 * rigid2loss.mean() \
             + 0 * vgradloss.mean() \
             + 0 * KEloss.mean() \
@@ -194,8 +194,8 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
             + .0 * u_selfadvectloss.mean() \
             + .01 * u_div2loss.mean() \
             + 0 * u_aloss.mean() \
-            + .0 * radialKE.mean() \
-            + .01 * jerkloss.mean()
+            + .01 * radialKE.mean() \
+            + .05 * jerkloss.mean()
         # - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
         reglosstime = time.time() - cpt
 
@@ -209,6 +209,8 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
 
         cpt = time.time()
         totalloss.backward()
+        if clipnorms:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm = clipnorm)
         optimizer.step()
         model.velfunc.imap.step((batch+1) / n_iters)
         steptime = time.time() - cpt
