@@ -8,6 +8,7 @@ import matplotlib.animation
 import torch
 import trimesh
 import ot
+import pdb
 from scipy.spatial.distance import squareform
 from torch import nn
 
@@ -159,14 +160,54 @@ class ImageDataset():
 
 class MeshDataset():
     def __init__(self, mesh_file):
-        self.mesh = trimesh.load(mesh_file)
+        self.mesh = trimesh.load_mesh(file_obj=mesh_file,file_type="obj")
+        self.mesh_file = mesh_file
+    
+    def getCacheName(mesh_file):
+        rname, ext = os.path.splitext(mesh_file)
+        fname = os.path.basename(rname)
+        dname = os.path.dirname(rname)
+        return os.path.join(dname,"." + fname + "_pointstore") + ext
+    
+    def clearCache(self):
+        cacheName = MeshDataset.getCacheName(self.mesh_file)
+        if os.path.exists(cacheName):
+            os.remove(cacheName)
 
-    def sample(self, n_inner=500, n_surface=500, scale=[1, -1], center=[0, 0]):
+    # saves/loads sampled points
+    def sample(self, n_inner=70, n_surface=30):
+        # load cache. check for already sampled points.
+        cacheName = MeshDataset.getCacheName(self.mesh_file)
+        if os.path.exists(cacheName):
+            cdict = torch.load(cacheName)
+        else:
+            cdict = {'pts_inner':np.empty((0,3)), 'pts_surface':np.empty((0,3))}
+        old_pts_inner = cdict["pts_inner"]
+        old_pts_surface = cdict["pts_surface"]
+        
+        # draw point samples to fill cache
+        n_new_pts_inner = max(n_inner - old_pts_inner.shape[0],0)
+        n_new_pts_surface = max(n_surface - old_pts_surface.shape[0],0)
+        new_pts_inner, new_pts_surface = self.sample_new(n_inner=n_new_pts_inner, n_surface=n_new_pts_surface)
+        
+        # save cache
+        pts_inner = np.append(old_pts_inner, new_pts_inner,axis=0)
+        pts_surface = np.append(old_pts_surface, new_pts_surface,axis=0)
+        if n_new_pts_inner != 0 or n_new_pts_surface != 0:
+            cdict = {'pts_inner':pts_inner,'pts_surface':pts_surface}
+            torch.save(cdict, cacheName)
+        
+        # draw points needed from cache
+        subsample_inds_inner = torch.randperm(pts_inner.shape[0])[:n_inner]
+        subsample_inds_surface = torch.randperm(pts_surface.shape[0])[:n_surface]
+        
+        return pts_inner[subsample_inds_inner,:], pts_surface[subsample_inds_surface,:]
+    
+    def sample_new(self, n_inner=70, n_surface=30):
         pts_surface, _ = trimesh.sample.sample_surface(self.mesh, n_surface)
         pts_inner = trimesh.sample.volume_mesh(self.mesh, n_inner*10)[:n_inner]
 
         return pts_inner, pts_surface
-
 
 class BoundingBox():
     # use like:
