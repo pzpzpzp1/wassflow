@@ -6,7 +6,9 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.animation
 import torch
-import ot, pdb
+import trimesh
+import ot
+from scipy.spatial.distance import squareform
 from torch import nn
 
 
@@ -19,13 +21,16 @@ def ezshow(dat, col='green'):
     datp = dat.detach().cpu().numpy()
     d = datp.shape[1]
     if d == 2:
-        plt.scatter(datp[:, 0], datp[:, 1], s=10, alpha=0.5, linewidths=0, c=col)
-    elif d==3:
-        ax.scatter(datp[:, 0], datp[:, 1], datp[:, 2], alpha=1, linewidths=0, c=col)
+        plt.scatter(datp[:, 0], datp[:, 1], s=10,
+                    alpha=0.5, linewidths=0, c=col)
+    elif d == 3:
+        ax.scatter(datp[:, 0], datp[:, 1], datp[:, 2],
+                   alpha=1, linewidths=0, c=col)
     else:
         # raise NameError("asdf")
         raise Exception("incorrect dimension")
     plt.axis('equal')
+
 
 class SpecialLosses():
     def __init(self):
@@ -34,37 +39,37 @@ class SpecialLosses():
     def grad_to_jac(grad):
         dim = grad.shape[1]
         return grad[:, 0:dim, 0:dim]
-    
+
     def radialKE(tz, z_dots):
-        dir = tz[:,1:]
+        dir = tz[:, 1:]
         normalizedRadial = dir/dir.norm(p=2, dim=1, keepdim=True)
         return (z_dots*normalizedRadial).sum(dim=1)**2
-    
+
     def jac_to_losses(z_jacs):
         dim = z_jacs.shape[1]
         N = z_jacs.shape[0]
-        
+
         # divergence squared
         div2loss = torch.zeros(N).to(device)
         for i in range(dim):
             div2loss += z_jacs[:, i, i]
         div2loss = div2loss**2
         # square norm of curl
-        curl2loss = torch.norm(z_jacs - z_jacs.transpose(1,2),p='fro',dim=(1,2))**2/2
-        
+        curl2loss = torch.norm(
+            z_jacs - z_jacs.transpose(1, 2), p='fro', dim=(1, 2))**2/2
+
         # rigid motion: x(t) -> e^[wt] x0 + kt.
         # v = x_dot = [w]x0+k; dvdx = [w].
         # ==> skew symmetric velocity gradient is rigid.
         # if J is displacement gradient, F=J+I is the deformation gradient,
         # then F'F-I is the green strain.
         # Linearizing this with small J results in J+J'
-        rigid2loss = torch.norm(z_jacs + z_jacs.transpose(1,2),p='fro',dim=(1,2))**2/4
+        rigid2loss = torch.norm(
+            z_jacs + z_jacs.transpose(1, 2), p='fro', dim=(1, 2))**2/4
         # v-field gradient loss
-        vgradloss = torch.norm(z_jacs,p='fro',dim=(1,2))**2
-        
+        vgradloss = torch.norm(z_jacs, p='fro', dim=(1, 2))**2
+
         return div2loss, curl2loss, rigid2loss, vgradloss
-        
-        
 
 
 class ImageDataset():
@@ -152,16 +157,27 @@ class ImageDataset():
         return z_target, aux
 
 
+class MeshDataset():
+    def __init__(self, mesh_file):
+        self.mesh = trimesh.load(mesh_file)
+
+    def sample(self, n_inner=500, n_surface=500, scale=[1, -1], center=[0, 0]):
+        pts_surface, _ = trimesh.sample.sample_surface(self.mesh, n_surface)
+        pts_inner = trimesh.sample.volume_mesh(self.mesh, n_inner*10)[:n_inner]
+
+        return pts_inner, pts_surface
+
+
 class BoundingBox():
     # use like:
     # BB = BoundingBox(z_target);
     # smps = BB.sampleuniform(t_N = 30, x_N = 10, y_N = 11, z_N=12, bbscale = 1.1);
     # smps = BB.samplerandom(N = 10000, bbscale = 1.1);
 
-    def __init__(self, z_target_full, square = False):
+    def __init__(self, z_target_full, square=False):
         self.T = z_target_full.shape[0]
         self.dim = z_target_full.shape[2]
-        
+
         # min corner, max corner, center
         self.mic = z_target_full.reshape(-1, self.dim).min(0)[0].detach()
         self.mac = z_target_full.reshape(-1, self.dim).max(0)[0].detach()
@@ -171,17 +187,17 @@ class BoundingBox():
             # min corner, max corner, center
             self.mac = self.C + (self.mac - self.C).max()
             self.mic = self.C - (self.mac - self.C).max()
-            
+
     def extendedBB(self, bbscale=1.1):
         # extended bounding box.
         emic = (self.mic-self.C)*bbscale+self.C
         emac = (self.mac-self.C)*bbscale+self.C
-                
+
         return emic, emac
 
     def sampleuniform(self, t_N=30, x_N=10, y_N=11, z_N=12, bbscale=1.1):
         [eLL, eTR] = self.extendedBB(bbscale)
-        
+
         tspace = torch.linspace(0, self.T-1, t_N)
         xspace = torch.linspace(eLL[0], eTR[0], x_N)
         yspace = torch.linspace(eLL[1], eTR[1], y_N)
@@ -210,6 +226,7 @@ class BoundingBox():
         z_sample = deltx*z_sample + torch.cat((TC, self.C))
 
         return z_sample
+
 
 class InputMapping(nn.Module):
     """Fourier features mapping"""
@@ -296,10 +313,10 @@ class SaveTrajectory():
 
     def save_trajectory(model, z_target_full, savedir='results/outcache/',
                         savename='', nsteps=20, dpiv=100, n=4000, alpha=.5,
-                        ot_type=2, writeTracers = False):
-        if z_target_full.shape[2]!=2:
+                        ot_type=2, writeTracers=False, rbf=True):
+        if z_target_full.shape[2] != 2:
             raise Exception("3d save trajectory not handled yet")
-        
+
         # save model
         if not os.path.exists(savedir+'models/'):
             os.makedirs(savedir+'models/')
@@ -320,15 +337,16 @@ class SaveTrajectory():
         x_traj_reverse = x_traj_reverse_t.cpu().detach().numpy()
         x_traj_forward = x_traj_forward_t.cpu().detach().numpy()
 
-        allpoints = torch.cat((x_traj_reverse_t,x_traj_forward_t,z_target),dim=0).detach() #.cpu().detach().numpy()
-        BB = BoundingBox(allpoints.detach(), square = False)
-        emic,emac = BB.extendedBB(1.1)
+        allpoints = torch.cat(
+            (x_traj_reverse_t, x_traj_forward_t, z_target), dim=0).detach()
+        BB = BoundingBox(allpoints.detach(), square=False)
+        emic, emac = BB.extendedBB(1.1)
         z_sample = BB.sampleuniform(t_N=1, x_N=20, y_N=20)
         z_sample_d = z_sample.cpu().detach().numpy()
-        
+
         # forward
         moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
-        fig, (ax) = plt.subplots(1,1)
+        fig, (ax) = plt.subplots(1, 1)
         with moviewriter.saving(fig, savedir+'forward_'+savename+'.mp4', dpiv):
             for i in range(nsteps):
                 for t in range(T):
@@ -350,7 +368,8 @@ class SaveTrajectory():
                             edgecolors='black')
 
                 ax.axis('equal')
-                ax.set(xlim=(emic[0].item(), emac[0].item()), ylim=(emic[1].item(), emac[1].item()))
+                ax.set(xlim=(emic[0].item(), emac[0].item()),
+                       ylim=(emic[1].item(), emac[1].item()))
                 plt.axis('off')
                 moviewriter.grab_frame()
                 plt.clf()
@@ -379,7 +398,8 @@ class SaveTrajectory():
                             edgecolors='black')
 
                 ax.axis('equal')
-                ax.set(xlim=(emic[0].item(), emac[0].item()), ylim=(emic[1].item(), emac[1].item()))
+                ax.set(xlim=(emic[0].item(), emac[0].item()),
+                       ylim=(emic[1].item(), emac[1].item()))
                 plt.axis('off')
                 moviewriter.grab_frame()
                 plt.clf()
@@ -454,71 +474,105 @@ class SaveTrajectory():
 
                     ax.axis('equal')
                     plt.axis('equal')
-                    ax.set(xlim=(emic[0].item(), emac[0].item()), ylim=(emic[1].item(), emac[1].item()))
+                    ax.set(xlim=(emic[0].item(), emac[0].item()),
+                           ylim=(emic[1].item(), emac[1].item()))
                     plt.axis('off')
                     moviewriter.grab_frame()
                     plt.clf()
             moviewriter.finish()
         plt.close(fig)
-        
+
         if writeTracers:
-            fig, (ax) = plt.subplots(1,1)
-            n = x_trajs.shape[0] # num particles
-            d = x_trajs.shape[1] # dimension
-            nf = x_trajs.shape[2] # number of frames in full trajectory
-            nft = torch.linspace(0,1,nf) # color tracers
-            nftt = torch.linspace(0,1,T) # color keyframes
-            cs = torch.tensor((.3, .5, 1)) # start color
-            cf = torch.tensor((.2, 1, .2)) # end color
-            x_trajs_f = x_trajs.transpose(1,2) 
-            nanc = torch.zeros(n,1,d)*float("nan")
+            fig, (ax) = plt.subplots(1, 1)
+            n = x_trajs.shape[0]  # num particles
+            d = x_trajs.shape[1]  # dimension
+            nf = x_trajs.shape[2]  # number of frames in full trajectory
+            nft = torch.linspace(0, 1, nf)  # color tracers
+            cs = torch.tensor((.3, .5, 1))  # start color
+            cf = torch.tensor((.2, 1, .2))  # end color
+            x_trajs_f = x_trajs.transpose(1, 2)
+            nanc = torch.zeros(n, 1, d)*float("nan")
             moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
             ax.axis('equal')
-            ax.set(xlim=(emic[0].item(), emac[0].item()), ylim=(emic[1].item(), emac[1].item()))
+            ax.set(xlim=(emic[0].item(), emac[0].item()),
+                   ylim=(emic[1].item(), emac[1].item()))
             ax.axis('off')
             dullingfactor = .7
-            with moviewriter.saving(fig, savedir + 'traj_'+savename+'.mp4', dpiv):
+            with moviewriter.saving(fig, savedir + 'traj_'+savename+'.mp4',
+                                    dpiv):
                 keyframe_percentage_curr = -1
-                for t in range(0,nf):
+                for t in range(0, nf):
                     ctt = (cs*(1-nft[t])+cf*nft[t])
                     dctt = (cs*(1-nft[t])+cf*nft[t])*dullingfactor
-                    ct = (ctt[0].item(),ctt[1].item(),ctt[2].item())
-                    dct = (dctt[0].item(),dctt[1].item(),dctt[2].item())
-                    
+                    ct = (ctt[0].item(), ctt[1].item(), ctt[2].item())
+                    dct = (dctt[0].item(), dctt[1].item(), dctt[2].item())
+
                     # plot velocities
                     z_dots_d = model.velfunc.get_z_dot(
                         z_sample[:, 0]*0.0 + t_trajs[t],
                         z_sample[:, 1:]).cpu().detach().numpy()
                     qvr = plt.quiver(z_sample_d[:, 1], z_sample_d[:, 2],
-                               z_dots_d[:, 0], z_dots_d[:, 1], headwidth= 1, headlength=3, headaxislength=2)
-                    
+                                     z_dots_d[:, 0], z_dots_d[:, 1],
+                                     headwidth=1, headlength=3,
+                                     headaxislength=2)
+
+
                     # plot keyframes as tracers pass by
                     keyframe_percentage = np.floor(t/(nf-1.)*(T-1))
                     if keyframe_percentage != keyframe_percentage_curr:
                         keyframe_percentage_curr = keyframe_percentage
                         tt = int(keyframe_percentage)
-                        plt.scatter(
-                            z_target.cpu().detach().numpy()[tt, :, 0],
-                            z_target.cpu().detach().numpy()[tt, :, 1],
-                            s=10, alpha=1, linewidths=0, color=dct, zorder = 2)
-                    
-                    if t>0:
+                        if rbf and False:
+                            pass
+                        else:
+                            plt.scatter(
+                                z_target.cpu().detach().numpy()[tt, :, 0],
+                                z_target.cpu().detach().numpy()[tt, :, 1],
+                                s=10, alpha=1, linewidths=0, color=dct,
+                                zorder=2)
+
+                    if t > 0:
                         # plot tracers. Using the [xy;xy;nan] trick from matlab to plot all segments of a timestep at once. it's faster than a for loop at least.
-                        segment_t = x_trajs_f[:,t-1:t+1,:]
-                        testp = torch.cat((segment_t, nanc),dim=1).reshape(-1,d).detach().cpu().numpy()
-                        plt.plot(testp[:,0],testp[:,1],alpha=.3, lw=.5, color = ct, zorder = 1)
+                        segment_t = x_trajs_f[:, t-1:t+1, :]
+                        testp = torch.cat(
+                            (segment_t, nanc), dim=1).reshape(-1, d).detach(
+                            ).cpu().numpy()
+                        plt.plot(testp[:, 0], testp[:, 1],
+                                 alpha=.3, lw=.5, color=ct, zorder=1)
 
                     # plot endpoints
-                    endpoints = x_trajs[:,:,t].detach().cpu().numpy()
-                    scr = plt.scatter(endpoints[:, 0], endpoints[:, 1], s=10,
-                                alpha=1, linewidths=0, color=dct, zorder = 2, edgecolors='k')
+                    if rbf or False:
+                        points = x_trajs[:, :, t].detach().cuda()
+                        pdists = torch.tensor(
+                            squareform(torch.pdist(points.cpu()))
+                        ).cuda()
+                        sigmas = pdists.topk(
+                            11, largest=False).values[:, -1]
+                        sigmas = sigmas*0 + 0.02
+                        xs = torch.linspace(-1, 1, 1000).cuda()
+                        ys = torch.linspace(-1, 1, 1000).cuda()
+                        grid = torch.stack(torch.meshgrid(xs, ys,
+                                                          indexing='xy'),
+                                           dim=-1)
+                        dists = (grid[:, :, None] -
+                                 points[None, None]).norm(p=2, dim=-1)
+                        zs = torch.exp(
+                            -(dists.pow(2) /
+                              (2 * sigmas[None, None]**2))).sum(-1)
+                        zs -= zs.min()
+                        zs /= zs.max()
+                    else:
+                        endpoints = x_trajs[:, :, t].detach().cpu().numpy()
+                        scr = plt.scatter(endpoints[:, 0], endpoints[:, 1],
+                                          s=10, alpha=1, linewidths=0,
+                                          color=dct, zorder=2, edgecolors='k')
 
                     moviewriter.grab_frame()
                     scr.remove()
                     qvr.remove()
             moviewriter.finish()
             plt.close(fig)
-            
+
         return x_trajs
 
 
@@ -538,7 +592,7 @@ class MiscTransforms():
 
     def OT_registration(source, target):
         raise Exception("deprecated inexact OT_registration.")
-        
+
         Loss = SamplesLoss("sinkhorn", p=2, blur=0.001, debias=False)
         x = source
         y = target
