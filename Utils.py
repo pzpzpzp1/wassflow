@@ -8,6 +8,7 @@ import matplotlib.animation
 import torch
 import trimesh
 import ot
+import glob
 import pdb
 from scipy.spatial.distance import squareform
 from torch import nn
@@ -160,7 +161,7 @@ class ImageDataset():
 
 class MeshDataset():
     def __init__(self, mesh_file):
-        self.mesh = trimesh.load_mesh(file_obj=mesh_file,file_type="obj")
+        self.mesh = trimesh.load(mesh_file)
         self.mesh_file = mesh_file
     
     def getCacheName(mesh_file):
@@ -671,6 +672,14 @@ class MiscTransforms():
         _vals, indices = Wd.transpose(0, 1).max(dim=0)
         return target[indices, :], indices
 
+    
+    def fill_scene_caches(scenedir, n_inner = 10000, n_surface = 10000):
+        for scene in glob.glob(scenedir+"/*"):
+            for objfile in glob.glob(scene+"/*.obj"):
+                print(objfile)
+                mesh = MeshDataset(objfile)
+                pts_inner, pts_surface = mesh.sample(n_inner=n_inner, n_surface=n_surface);
+    
     # CODE SNIPPET FOR DEBUGGING GEOMLOSS OT_REGISTRATION IF IT BUGS OUT.
     # import Utils; importlib.reload(Utils); from Utils import MiscTransforms
     # dic = torch.load("otdebug.tar");
