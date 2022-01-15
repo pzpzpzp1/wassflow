@@ -138,8 +138,11 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
             z_jacs, z_dots.reshape(n_points, dim, 1)) + z_accel
         selfadvectloss = torch.norm(selfadvect,p=2,dim=1)**2 
         # Kurvature loss.
-        z_dots_pad = F.pad(z_dots, (0, 1))
-        z_accel_pad = F.pad(z_accel.view(-1, dim), (0, 1))
+        z_dots_pad = z_dots
+        z_accel_pad = z_accel.reshape(-1, dim)
+        if dim==2:
+            z_dots_pad = F.pad(z_dots_pad, (0, 1))
+            z_accel_pad = F.pad(z_accel_pad, (0, 1))
         kurvature = torch.norm(
             torch.cross(z_dots_pad, z_accel_pad), p=2, dim=1,
             keepdim=True) / z_dot_norms ** 3
