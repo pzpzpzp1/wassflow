@@ -4,6 +4,7 @@ from ODEModel import FfjordModel
 from Utils import (BoundingBox, ImageDataset, SaveTrajectory as st,
                    SpecialLosses as sl,
                   MeshDataset)
+import Utils
 from geomloss import SamplesLoss
 import numpy as np
 import time
@@ -19,8 +20,11 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
                          model=FfjordModel(), outname='results/outcache/',
                          visualize=False, sqrtfitloss=True, detachTZM=False, lr = 4e-4, clipnorm = 1,
                         inner_percentage = .6, n_total = 3000, stepsperbatch = 50):
-    
-    meshSamplePoints = MeshDataset.meshArrayToPoints(keyMeshes, inner_percentage, n_total)
+    # dirty hack to maintain compatibility with 2D inputs
+    if type(keyMeshes[0]) is np.ndarray:
+        meshSamplePoints = keyMeshes
+    else:
+        meshSamplePoints = MeshDataset.meshArrayToPoints(keyMeshes, inner_percentage, n_total)
     z_target_full, __ = ImageDataset.normalize_samples(torch.tensor(meshSamplePoints).to(device).float())
     
     # normalize to fit in [0,1] box.
