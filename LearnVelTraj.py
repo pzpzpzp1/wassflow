@@ -193,7 +193,7 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
         # combine energies
         # timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
         # timeIndices = (z_sample[:,0] < ((T-1.)/.001)).detach()
-        regloss = .01 * div2loss.mean() \
+        regloss = .001 * div2loss.mean() \
             + 0 * rigid2loss.mean() \
             + .01 * vgradloss.mean() \
             + 0 * KEloss.mean() \
@@ -235,50 +235,13 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
                 n_subsample = z_target_full.shape[1]
             if n_subsample > max_n_subsample:
                 n_subsample = max_n_subsample
-
-        if (batch % stepsperbatch == 0 or batch == n_iters-1):
+                
+            # update LR
             scheduler.step(totalloss.item())  # timestep schedule.
             for g in optimizer.param_groups:
                 currlr = g['lr']
 
-            if visualize:
-                if dim!=2:
-                    raise Exception("no viz for 3d yet.")
-                
-                f, (ax1, ax2) = plt.subplots(1, 2)
-                z_t = model(z_target[0],
-                            integration_times=torch.linspace(
-                                0, T-1, T).to(device))
-                for t in range(T):
-                    ax1.scatter(
-                        z_t.cpu().detach().numpy()[t, :, 0],
-                        z_t.cpu().detach().numpy()[t, :, 1],
-                        s=10, alpha=.5, linewidths=0, c='blue',
-                        edgecolors='black')
-                    ax1.scatter(
-                        z_target.cpu().detach().numpy()[t, :, 0],
-                        z_target.cpu().detach().numpy()[t, :, 1],
-                        s=10, alpha=.5, linewidths=0, c='green',
-                        edgecolors='black')
-                ax1.axis('equal')
-
-                z_t = model(z_target[T-1],
-                            integration_times=torch.linspace(
-                                T-1, 0, T).to(device))
-                for t in range(T):
-                    ax2.scatter(
-                        z_t.cpu().detach().numpy()[t, :, 0],
-                        z_t.cpu().detach().numpy()[t, :, 1],
-                        s=10, alpha=.5, linewidths=0, c="blue",
-                        edgecolors='black')
-                    ax2.scatter(
-                        z_target.cpu().detach().numpy()[t, :, 0],
-                        z_target.cpu().detach().numpy()[t, :, 1],
-                        s=10, alpha=.5, linewidths=0, c="green",
-                        edgecolors='black')
-                ax2.axis('equal')
-                plt.show()
-
+        if (batch % stepsperbatch == 0 or batch == n_iters-1):
             ptime = time.time() - start
 
             cpt = time.time()
@@ -336,6 +299,6 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
     st.save_losses(losses, separate_losses, outfolder=outname, maxcap=10000)
 
     st.save_trajectory(model, z_target_full, savedir=outname,
-                       savename='final', nsteps=20, dpiv=400, n=3000, writeTracers=True, meshArray=keyMeshes)
+                       savename='final', nsteps=20, dpiv=400, n=5000, writeTracers=True, meshArray=keyMeshes)
 
     return model, losses, separate_losses, lrs, n_subs, separate_times
