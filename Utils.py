@@ -154,7 +154,7 @@ class ImageDataset():
                                 [-1.5, 1.5], [-1.5, 1.5]])
         return img
 
-    def normalize_samples(z_target, aux=None):
+    def normalize_samples(z_target):
         # normalize a [K,N,D] tensor.
         # K is number of frames. N is number of samples. D is dimension.
         # Fit into [-1,1] box without changing aspect ratio.
@@ -165,12 +165,10 @@ class ImageDataset():
         z_target /= max(BB1.mac)
         z_target /= 1.1  # adds buffer to the keyframes from -1,1 border.
 
-        if aux is not None:
-            aux -= BB0.C
-            aux /= max(BB1.mac)
-            aux /= 1.1
-
-        return z_target, aux
+        # lambda transform to apply on other things if needed
+        transform = lambda x : (x-BB0.C)/max(BB1.mac)/1.1
+        
+        return z_target, transform
 
 
 class MeshDataset():

@@ -25,10 +25,15 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
         meshSamplePoints = keyMeshes
     else:
         meshSamplePoints = MeshDataset.meshArrayToPoints(keyMeshes, inner_percentage, n_total)
-    z_target_full, __ = ImageDataset.normalize_samples(torch.tensor(meshSamplePoints).to(device).float())
+    
+    # normalize point cloud and apply to meshes if needed
+    z_target_full, transform = ImageDataset.normalize_samples(torch.tensor(meshSamplePoints).to(device).float())
+    if type(keyMeshes[0]) is not np.ndarray:
+        for i in range(len(keyMeshes)):
+            keyMeshes[i].mesh.vertices = transform(torch.tensor(keyMeshes[i].mesh.vertices).to(device)).cpu().numpy()
+            
     
     # normalize to fit in [0,1] box.
-    z_target_full, __ = ImageDataset.normalize_samples(z_target_full)
     my_loss_f = SamplesLoss("sinkhorn", p=2, blur=0.00001)
     if not os.path.exists(outname):
         os.makedirs(outname)
