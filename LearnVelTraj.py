@@ -23,10 +23,17 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
     if not os.path.exists(outname):
         os.makedirs(outname)
     model.to(device)
+    
+    fullshape = z_target_full.shape  # [T, n_samples, d]
+    T = fullshape[0]
+    n_total = fullshape[1]
+    dim = fullshape[2]
 
     # more is too slow.
     # 2000 is enough to get a reasonable capture of the image per iter.
     max_n_subsample = 1100
+    if dim==3:
+        max_n_subsample = 3000
     n_subsample = min(n_subsample, max_n_subsample)
     currlr = lr
     stepsperbatch = 50
@@ -43,10 +50,6 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
     lrs = np.empty((1, n_iters))
     n_subs = np.empty((1, n_iters))
     
-    fullshape = z_target_full.shape  # [T, n_samples, d]
-    T = fullshape[0]
-    n_total = fullshape[1]
-    dim = fullshape[2]
     n_subsample = min(n_subsample, n_total)
     subsample_inds = torch.randperm(n_total)[:n_subsample]
     
@@ -185,20 +188,20 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
         # combine energies
         # timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
         # timeIndices = (z_sample[:,0] < ((T-1.)/.001)).detach()
-        regloss = .05 * div2loss.mean() \
+        regloss = .01 * div2loss.mean() \
             + 0 * rigid2loss.mean() \
-            + 0 * vgradloss.mean() \
+            + .01 * vgradloss.mean() \
             + 0 * KEloss.mean() \
-            + .001 * selfadvectloss.mean() \
+            + .000 * selfadvectloss.mean() \
             + .00 * Aloss.mean() \
             + .00 * AVloss.mean() \
-            + .15 * Kloss.mean() \
+            + .00 * Kloss.mean() \
             - 0 * torch.clamp(curl2loss.mean(), 0, .02) \
             + .0 * u_selfadvectloss.mean() \
-            + .01 * u_div2loss.mean() \
+            + .0 * u_div2loss.mean() \
             + 0 * u_aloss.mean() \
-            + .01 * radialKE.mean() \
-            + .05 * jerkloss.mean()
+            + .00 * radialKE.mean() \
+            + .01 * jerkloss.mean()
         # - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
         reglosstime = time.time() - cpt
 
@@ -290,7 +293,7 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
                   f"| fit: {fitlosstime:.4f}",
                   f"| reg: {reglosstime:.4f}",
                   f"| save: {savetime:.4f})",
-                  f"| autograd: {steptime:.4f}]\n")
+                  f"| autograd: {steptime:.4f}]")
 
             start = time.time()  # reset clock to next save
 
