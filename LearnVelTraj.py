@@ -2,7 +2,8 @@ from tqdm import tqdm
 import os
 from ODEModel import FfjordModel
 from Utils import (BoundingBox, ImageDataset, SaveTrajectory as st,
-                   SpecialLosses as sl)
+                   SpecialLosses as sl,
+                  MeshDataset)
 from geomloss import SamplesLoss
 import numpy as np
 import time
@@ -14,9 +15,14 @@ from torch.nn import functional as F
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
+def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
                          model=FfjordModel(), outname='results/outcache/',
-                         visualize=False, sqrtfitloss=True, detachTZM=False, lr = 4e-4, clipnorm = 1):
+                         visualize=False, sqrtfitloss=True, detachTZM=False, lr = 4e-4, clipnorm = 1,
+                        inner_percentage = .6, n_total = 3000, stepsperbatch = 50):
+    
+    meshSamplePoints = MeshDataset.meshArrayToPoints(keyMeshes, inner_percentage, n_total)
+    z_target_full, __ = ImageDataset.normalize_samples(torch.tensor(meshSamplePoints).to(device).float())
+    
     # normalize to fit in [0,1] box.
     z_target_full, __ = ImageDataset.normalize_samples(z_target_full)
     my_loss_f = SamplesLoss("sinkhorn", p=2, blur=0.00001)
@@ -36,7 +42,6 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
         max_n_subsample = 3000
     n_subsample = min(n_subsample, max_n_subsample)
     currlr = lr
-    stepsperbatch = 50
     optimizer = torch.optim.Adam(model.parameters(), lr=currlr)
     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
         optimizer, 'min', factor=.5, patience=1, min_lr=1e-7)
@@ -280,7 +285,7 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
             if batch > 0:
                 st.save_trajectory(model, z_target_full, savedir=outname,
                                    savename=f"{batch:04}", nsteps=11, n=300,
-                                   dpiv=400)
+                                   dpiv=400, meshArray=keyMeshes)
             savetime = time.time() - cpt
 
             # print summary stats
@@ -331,6 +336,6 @@ def learn_vel_trajectory(z_target_full, n_iters=10, n_subsample=100,
     st.save_losses(losses, separate_losses, outfolder=outname, maxcap=10000)
 
     st.save_trajectory(model, z_target_full, savedir=outname,
-                       savename='final', nsteps=20, dpiv=400, n=1000, writeTracers=True)
+                       savename='final', nsteps=20, dpiv=400, n=3000, writeTracers=True, meshArray=keyMeshes)
 
     return model, losses, separate_losses, lrs, n_subs, separate_times

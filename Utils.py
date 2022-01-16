@@ -16,6 +16,7 @@ from torch import nn
 import pandas as pd
 import plotly
 import plotly.express as px
+import plotly.graph_objs as go
 from plotly import tools
 from plotly.graph_objs import * #all the types of plots that we will plot here
 # plotly.offline.init_notebook_mode()
@@ -39,14 +40,13 @@ def ezshow(dat, col='green'):
         raise Exception("incorrect dimension")
     plt.axis('equal')
     
-def ezshow3D(xyz, col='rgb(0,0,210)', alpha=.2, size=3, fig=None):
+def ezshow3D(xyz, col='rgb(0,0,210)', alpha=.2, size=3, show=False):
     trace = Scatter3d(x=xyz[:,0],y=xyz[:,1],z=xyz[:,2],mode='markers',marker=dict(size=size, color=col, colorscale='Viridis', opacity=alpha ))
-    if fig is None:
+    if show:
         layout = Layout(margin=dict(l=0,r=0,b=0,t=0),scene_dragmode='orbit',scene=dict(aspectmode='data'))
-        fig = Figure(data=[], layout=layout)
-    fig.add_trace(trace)
-    
-    return fig, trace
+        fig = Figure(data=[trace], layout=layout)
+        fig.show()
+    return trace
 
 class SpecialLosses():
     def __init(self):
@@ -228,7 +228,62 @@ class MeshDataset():
         pts_inner = trimesh.sample.volume_mesh(self.mesh, n_inner*10)[:n_inner]
 
         return pts_inner, pts_surface
-
+    
+    def plotly_trace(self, color=None, opacity=.8):
+        X = self.mesh.vertices
+        T = self.mesh.faces
+        fc = None
+        
+        if color is None:
+            fc = (X[T[:,0],:]+X[T[:,1],:]+X[T[:,2],:])/3
+        
+        gob = go.Mesh3d(x=X[:,0], y=X[:,1], z=X[:,2], i=T[:,0], j=T[:,1], k=T[:,2], color=color, opacity=opacity, facecolor = fc, flatshading=True)
+        return gob
+    
+    def meshArrayToTraces(meshArray, color=None, opacity=.8, show=False):
+        traces = []
+        
+        if color is None:
+            color = []
+            cs = np.array([1, .1, .1])  # start color
+            cf = np.array([1, .64, .2])  # end color
+            colorinterp = np.linspace(0,1,len(meshArray))
+            for i in range(len(meshArray)):
+                ct = np.round(((1-colorinterp[i])*cs + cf*colorinterp[i])*255)
+                color.append(f"rgb({ct[0]:03},{ct[1]:03},{ct[2]:03})")
+            
+        
+        for i in range(len(meshArray)):
+            if type(color) is list:
+                col = color[0]
+                if len(color) > 1:
+                    col = color[i]
+            else:
+                col = color
+            traces.append(meshArray[i].plotly_trace(color=col, opacity=opacity))
+        
+        if show:
+            layout = Layout(margin=dict(l=0,r=0,b=0,t=0),scene_dragmode='orbit',scene=dict(aspectmode='data'))
+            Figure(data=traces, layout = layout).show()
+    
+        return traces
+        
+    
+    def meshArrayToPoints(meshArray, inner_percentage, n_total, combined = True):
+        
+        n_inner = round(n_total*inner_percentage)
+        n_surface = n_total - n_inner
+        pts_inner = np.zeros((len(meshArray),n_inner,3))
+        pts_surface = np.zeros((len(meshArray),n_surface,3))
+        for i in range(len(meshArray)):
+            pts_inner[i,:,:], pts_surface[i,:,:] = meshArray[i].sample(n_inner=n_inner, n_surface=n_surface, combined = False);
+        
+        if combined:
+            return np.concatenate((pts_inner, pts_surface), axis=1)
+        
+        return pts_inner, pts_surface
+        
+        
 class BoundingBox():
     # use like:
     # BB = BoundingBox(z_target);
@@ -377,7 +432,7 @@ class SaveTrajectory():
 
     def save_trajectory(model, z_target_full, savedir='results/outcache/',
                         savename='', nsteps=20, dpiv=100, n=4000, alpha=.5,
-                        ot_type=2, writeTracers=False, rbf=True):
+                        ot_type=2, writeTracers=False, rbf=True, meshArray=None):
         # handler for different dimensions
         if z_target_full.shape[1]==2:
             SaveTrajectory.save_trajectory_2d(model, z_target_full, savedir,
@@ -386,11 +441,11 @@ class SaveTrajectory():
         else:
             SaveTrajectory.save_trajectory_3d(model, z_target_full, savedir,
                         savename, nsteps, dpiv, n, alpha,
-                        ot_type, writeTracers, rbf)
+                        ot_type, writeTracers, rbf, meshArray=meshArray)
         
     def save_trajectory_3d(model, z_target_full, savedir='results/outcache/',
                         savename='', nsteps=20, dpiv=100, n=4000, alpha=.2,
-                        ot_type=2, writeTracers=False, rbf=True):
+                        ot_type=2, writeTracers=False, rbf=True, meshArray=None):
         # initialize
         if not os.path.exists(savedir+'models/'):
             os.makedirs(savedir+'models/')
@@ -398,6 +453,8 @@ class SaveTrajectory():
         dim = z_target_full.shape[2]
         T = z_target_full.shape[0]
         colormap = plotly.express.colors.sequential.Viridis
+        keytraces = MeshDataset.meshArrayToTraces(meshArray, color='blue', opacity=.05, show=False) if meshArray is not None else []
+        layout = Layout(margin=dict(l=0,r=0,b=0,t=0),scene_dragmode='orbit',scene=dict(aspectmode='data', aspectratio=dict(x=1,y=1,z=1)))
         
         # subsample points
         if n > z_target_full.shape[1]:
@@ -419,46 +476,45 @@ class SaveTrajectory():
         emic, emac = BB.extendedBB(1.1, returnNP=True)
         z_sample = BB.sampleuniform(t_N=1, x_N=20, y_N=20)
         z_sample_d = z_sample.cpu().detach().numpy()
+        BB_trace = Scatter3d(name="",visible=True,showlegend=False,opacity=0,hoverinfo='none',x=[emic[0],emac[0]],y=[emic[1],emac[1]],z=[emic[2],emac[2]])
         
         ## FORWARD
         nframes = x_traj_forward_t.shape[0]
         xyz = x_traj_forward_t.reshape((nframes*n,dim)).cpu().detach().numpy() 
         framenum = torch.repeat_interleave(torch.arange(nframes),n).cpu().detach().numpy() 
-        df = pd.DataFrame(dict(xp=xyz[:,0], yp=xyz[:,1], zp=xyz[:,2], framenum = framenum, size = 1 ))
+        df = pd.DataFrame(dict(xp=xyz[:,0], yp=xyz[:,1], zp=xyz[:,2], framenum = framenum, size = 1, colors = nframes-framenum ))
         # plot animation 
         fig = px.scatter_3d(df, x="xp", y="yp", z="zp", opacity=alpha,
                             animation_frame="framenum", # symbol = "framenum",
                             size="size", size_max = 10, 
-                            color="framenum", color_continuous_scale = colormap, range_color = [-nframes*.1, nframes*.9])
+                            color="colors", color_continuous_scale = colormap, range_color = [-nframes*1, nframes*.9])
         # remove marker outlines from animation
         for i in range(len(fig.frames)):
             fig.frames[i].data[0]['marker']['line']=dict(width=0,color='DarkSlateGrey')
-        # plot keyframes
-        for i in range(T):
-            fig, _trace = ezshow3D(z_target[i,:,:].cpu().detach().numpy(), fig=fig)
-        # Add 2 bounding box points and set aspectmode to data: Keeps aspect ratio and fixes axes.
-        fig.add_trace(Scatter3d(name="",visible=True,showlegend=False,opacity=0,hoverinfo='none',x=[emic[0],emac[0]],y=[emic[1],emac[1]],z=[emic[2],emac[2]]))
-        fig.update_layout(margin=dict(l=0,r=0,b=0,t=0),scene_dragmode='orbit',scene=dict(aspectmode='data', aspectratio=dict(x=1,y=1,z=1)))
+        # plot background
+        for i in range(len(keytraces)):
+            fig.add_trace(keytraces[i])
+        fig.add_trace(BB_trace)
+        fig.update_layout(layout)
         plotly.offline.plot(fig, filename=savedir+'forward_'+savename+'.html')
         
         ## REVERSE
         nframes = x_traj_reverse_t.shape[0]
         xyz = x_traj_reverse_t.reshape((nframes*n,dim)).cpu().detach().numpy() 
         framenum = torch.repeat_interleave(torch.arange(nframes),n).cpu().detach().numpy() 
-        df = pd.DataFrame(dict(xp=xyz[:,0], yp=xyz[:,1], zp=xyz[:,2], framenum = framenum, size = 1 ))
+        df = pd.DataFrame(dict(xp=xyz[:,0], yp=xyz[:,1], zp=xyz[:,2], framenum = framenum, size = 1, colors = nframes-framenum ))
         # plot animation 
         fig = px.scatter_3d(df, x="xp", y="yp", z="zp", opacity=alpha,
                             animation_frame="framenum", # symbol = "framenum",
                             size="size", size_max = 10, 
-                            color="framenum", color_continuous_scale = colormap, range_color = [-nframes*.1, nframes*.9])
+                            color="colors", color_continuous_scale = colormap, range_color = [-nframes*1, nframes*.9])
         # remove marker outlines from animation
         for i in range(len(fig.frames)):
             fig.frames[i].data[0]['marker']['line']=dict(width=0,color='DarkSlateGrey')
-        # plot keyframes
-        for i in range(T):
-            fig, _trace = ezshow3D(z_target[i,:,:].cpu().detach().numpy(), fig=fig)
-        # Add 2 bounding box points and set aspectmode to data: Keeps aspect ratio and fixes axes.
-        fig.add_trace(Scatter3d(name="",visible=True,showlegend=False,opacity=0,hoverinfo='none',x=[emic[0],emac[0]],y=[emic[1],emac[1]],z=[emic[2],emac[2]]))
+        # plot background
+        for i in range(len(keytraces)):
+            fig.add_trace(keytraces[i])
+        fig.add_trace(BB_trace)
         fig.update_layout(margin=dict(l=0,r=0,b=0,t=0),scene_dragmode='orbit',scene=dict(aspectmode='data', aspectratio=dict(x=1,y=1,z=1)))
         plotly.offline.plot(fig, filename=savedir+'rev_'+savename+'.html')
         
@@ -517,7 +573,7 @@ class SaveTrajectory():
                 framenum = np.concatenate((framenum, np.ones(fs.shape[0]+ft.shape[0]+x_traj.shape[0])*frame_counter), axis = 0)
                 colorgroup = np.concatenate((colorgroup, np.ones(fs.shape[0])*2.4), axis = 0)
                 colorgroup = np.concatenate((colorgroup, np.ones(ft.shape[0])*2.6), axis = 0)
-                colorgroup = np.concatenate((colorgroup, np.ones(x_traj.shape[0])*2), axis = 0)
+                colorgroup = np.concatenate((colorgroup, np.ones(x_traj.shape[0])*1.7), axis = 0)
                 frame_counter = frame_counter+1
         df = pd.DataFrame(dict(xp=xyz[:,0], yp=xyz[:,1], zp=xyz[:,2], framenum = framenum, size = 1, colorgroup = colorgroup ))
         # plot animation 
@@ -528,11 +584,10 @@ class SaveTrajectory():
         # remove marker outlines from animation
         for i in range(len(fig.frames)):
             fig.frames[i].data[0]['marker']['line']=dict(width=0,color='DarkSlateGrey')
-        # plot keyframes
-        for i in range(T):
-            fig, _trace = ezshow3D(z_target[i,:,:].cpu().detach().numpy(), fig=fig)
-        # Add 2 bounding box points and set aspectmode to data: Keeps aspect ratio and fixes axes.
-        fig.add_trace(Scatter3d(name="",visible=True,showlegend=False,opacity=0,hoverinfo='none',x=[emic[0],emac[0]],y=[emic[1],emac[1]],z=[emic[2],emac[2]]))
+        # plot background
+        for i in range(len(keytraces)):
+            fig.add_trace(keytraces[i])
+        fig.add_trace(BB_trace)
         fig.update_layout(margin=dict(l=0,r=0,b=0,t=0),scene_dragmode='orbit',scene=dict(aspectmode='data', aspectratio=dict(x=1,y=1,z=1)))
         plotly.offline.plot(fig, filename=savedir+'fb_'+savename+'.html')
         
