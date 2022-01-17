@@ -46,7 +46,8 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
 
     # more is too slow.
     # 2000 is enough to get a reasonable capture of the image per iter.
-    max_n_subsample = 1100
+    # max_n_subsample = 1100
+    max_n_subsample = 5000
     if dim==3:
         max_n_subsample = 3000
     n_subsample = min(n_subsample, max_n_subsample)
@@ -248,7 +249,10 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
             # update LR
             scheduler.step(totalloss.item())  # timestep schedule.
             for g in optimizer.param_groups:
-                currlr = g['lr']
+                if currlr != g['lr']
+                    currlr = g['lr']
+                    # if energy has plateaud, its a sign to use more accurate gradients
+                    detachTZM = False
 
         if (batch % stepsperbatch == 0 or batch == n_iters-1):
             ptime = time.time() - start
@@ -256,7 +260,7 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
             cpt = time.time()
             if batch > 0:
                 st.save_trajectory(model, z_target_full, savedir=outname,
-                                   savename=f"{batch:04}", nsteps=11, n=300,
+                                   savename=f"{batch:04}", nsteps=7, n=800,
                                    dpiv=400, meshArray=keyMeshes)
             savetime = time.time() - cpt
 
