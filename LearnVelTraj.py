@@ -249,7 +249,7 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
             # update LR
             scheduler.step(totalloss.item())  # timestep schedule.
             for g in optimizer.param_groups:
-                if currlr != g['lr']
+                if currlr != g['lr']:
                     currlr = g['lr']
                     # if energy has plateaud, its a sign to use more accurate gradients
                     detachTZM = False
