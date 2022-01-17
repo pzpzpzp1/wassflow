@@ -234,7 +234,7 @@ class MeshDataset():
         
         if color is None:
             fc = (X[T[:,0],:]+X[T[:,1],:]+X[T[:,2],:])/3
-        
+        # lighting=dict(ambient= 0.55,diffuse= 0.5,specular= 0.75,roughness=0.25,fresnel= 0.25)
         gob = go.Mesh3d(x=X[:,0], y=X[:,1], z=X[:,2], i=T[:,0], j=T[:,1], k=T[:,2], color=color, opacity=opacity, facecolor = fc, flatshading=True)
         return gob
     

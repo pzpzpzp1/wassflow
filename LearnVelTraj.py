@@ -18,7 +18,7 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
                          model=FfjordModel(), outname='results/outcache/',
-                         visualize=False, sqrtfitloss=True, detachTZM=False, lr = 4e-4, clipnorm = 1,
+                         visualize=False, sqrtfitloss=True, detachTZM=True, lr = 4e-4, clipnorm = 1,
                         inner_percentage = .6, n_total = 3000, stepsperbatch = 50):
     # dirty hack to maintain compatibility with 2D inputs
     if type(keyMeshes[0]) is np.ndarray:
