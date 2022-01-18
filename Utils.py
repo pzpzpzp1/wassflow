@@ -17,6 +17,7 @@ import plotly.graph_objs as go
 from plotly.graph_objs import Figure, Layout, Scatter3d
 from scipy.spatial.distance import squareform
 from torch import nn
+import pdb
 
 
 use_cuda = torch.cuda.is_available()
@@ -640,7 +641,7 @@ class SaveTrajectory():
                 ax.set(xlim=(emic[0].item(), emac[0].item()),
                        ylim=(emic[1].item(), emac[1].item()))
                 ax.axis('off')
-                dullingfactor = .4
+                dullingfactor = .6
                 with moviewriter.saving(fig, savedir + 'traj_'+savename+'.mp4',
                                         dpiv):
                     keyframe_percentage_curr = -1
@@ -657,7 +658,7 @@ class SaveTrajectory():
                         qvr = ax.quiver(z_sample_d[:, 1], z_sample_d[:, 2],
                                         z_dots_d[:, 0], z_dots_d[:, 1],
                                         headwidth=1, headlength=3,
-                                        headaxislength=2)
+                                        headaxislength=2,zorder=2)
 
                         # plot keyframes as tracers pass by
                         keyframe_percentage = np.floor(t/(nf-1.)*(T-1))
@@ -671,7 +672,7 @@ class SaveTrajectory():
                                     z_target.cpu().numpy()[tt, :, 0],
                                     z_target.cpu().numpy()[tt, :, 1],
                                     s=10, alpha=1, linewidths=0, color=dct,
-                                    zorder=2)
+                                    zorder=3)
 
                         if t > 0:
                             # plot tracers. Using the [xy;xy;nan] trick from matlab to plot all segments of a timestep at once. it's faster than a for loop at least.
@@ -682,8 +683,10 @@ class SaveTrajectory():
                             ax.add_collection(lc)
 
                         # plot endpoints
-                        if rbf:
+                        if rbf and t != nf-1:
                             points = x_trajs[:, :, t].to(device)
+                            frameBB = BoundingBox(x_trajs[:, :, t:t+1].permute((2,0,1)), square=False)
+                            emicf, emacf = frameBB.extendedBB(1.2)
 
                             if sigma is not None:
                                 sigmas = torch.tensor(sigma).to(device)
@@ -693,16 +696,25 @@ class SaveTrajectory():
                                 ).to(device)
                                 sigmas = pdists.topk(
                                     knn+1, largest=False).values[:, -1]
-
+                            
+                            # sample Ntot points in a rectangular grid, while being fair to aspect ratio
+                            Ntot = 5000
+                            width=emacf[0].item()-emicf[0].item()
+                            height=emacf[1].item()-emicf[1].item()
+                            widthSamples = width/height
+                            nH = int(np.floor(np.sqrt(Ntot*height/width)))
+                            nW = int(np.floor(Ntot/nH))
+                            
                             xs = torch.linspace(
-                                emic[0].item(), emac[0].item(),
-                                1000).to(device)
+                                emicf[0].item(), emacf[0].item(),
+                                nW).to(device)
                             ys = torch.linspace(
-                                emic[1].item(), emac[1].item(),
-                                1000).to(device)
+                                emicf[1].item(), emacf[1].item(),
+                                nH).to(device)
                             grid = torch.stack(torch.meshgrid(xs, ys,
                                                               indexing='xy'),
                                                dim=-1)
+                            
                             dists = (grid[:, :, None] -
                                      points[None, None]).norm(p=2, dim=-1)
                             zs = torch.exp(
@@ -710,22 +722,29 @@ class SaveTrajectory():
                                   (2 * sigmas[None, None]**2))).sum(-1)
                             zs -= zs.min()
                             zs /= zs.max()
+                            # increase contrast
+                            zs = (torch.tanh(7*(zs-.5))+1)/2
+                            zs*=.95
+
+                            # pdb.set_trace()
+                            dctt2 = (cs*(1-nft[t])+cf*nft[t])*dullingfactor*.6
+                            dct2 = (dctt2[0].item(), dctt2[1].item(), dctt2[2].item())
 
                             zs = zs.cpu().numpy()[:, :, None]
-                            color = np.array(dct + (1,))
+                            color = np.array(dct2 + (1,))
                             im = zs * color + (1-zs) * np.array([1, 1, 1, 0])
                             im = (im * 255).astype(np.uint8)
 
                             scr = ax.imshow(
-                                im, extent=(emic[0].item(), emac[0].item(),
-                                            emic[1].item(), emac[1].item()),
-                                origin='lower', zorder=2)
+                                im, extent=(emicf[0].item(), emacf[0].item(),
+                                            emicf[1].item(), emacf[1].item()),
+                                origin='lower', zorder=4)
 
                         else:
                             endpoints = x_trajs[:, :, t].cpu().numpy()
                             scr = ax.scatter(endpoints[:, 0], endpoints[:, 1],
                                              s=10, alpha=1, linewidths=0,
-                                             color=dct, zorder=2, edgecolors='k')
+                                             color=dct, zorder=3, edgecolors='k')
 
                         moviewriter.grab_frame()
                         scr.remove()

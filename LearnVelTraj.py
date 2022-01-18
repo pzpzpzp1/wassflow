@@ -19,9 +19,9 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
                          model=FfjordModel(), outname='results/outcache/',
                          visualize=False, sqrtfitloss=True, detachTZM=True,
                          lr=4e-4, clipnorm=1, inner_percentage=.6,
-                         n_total=3000, stepsperbatch=50):
+                         n_total=3000, stepsperbatch=50, scaling = .5):
     # dirty hack to maintain compatibility with 2D inputs
-    if type(keyMeshes[0]) is np.ndarray:
+    if type(keyMeshes[0]) is torch.Tensor:
         meshSamplePoints = keyMeshes
     else:
         meshSamplePoints = MeshDataset.meshArrayToPoints(
@@ -30,13 +30,13 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
     # normalize point cloud and apply to meshes if needed
     z_target_full, transform = ImageDataset.normalize_samples(
         torch.tensor(meshSamplePoints).to(device).float())
-    if type(keyMeshes[0]) is not np.ndarray:
+    if type(keyMeshes[0]) is not torch.Tensor:
         for i in range(len(keyMeshes)):
             keyMeshes[i].mesh.vertices = transform(torch.tensor(
                 keyMeshes[i].mesh.vertices).to(device)).cpu().numpy()
 
     # normalize to fit in [0,1] box.
-    my_loss_f = SamplesLoss("sinkhorn", p=2, blur=0.00001)
+    my_loss_f = SamplesLoss("sinkhorn", p=2, blur=0.0001, scaling = scaling)
     if not os.path.exists(outname):
         os.makedirs(outname)
     model.to(device)
@@ -317,8 +317,9 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
 
     st.save_losses(losses, separate_losses, outfolder=outname, maxcap=10000)
 
+    n_final_default = 5000 if dim==3 else 2000
     st.save_trajectory(model, z_target_full, savedir=outname, savename='final',
-                       nsteps=20, dpiv=400, n=5000, writeTracers=True,
+                       nsteps=20, dpiv=600, n=n_final_default, writeTracers=True,
                        meshArray=keyMeshes)
 
     return model, losses, separate_losses, lrs, n_subs, separate_times
