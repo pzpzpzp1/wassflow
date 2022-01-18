@@ -1,25 +1,23 @@
 import cv2 as cv
+import glob
 import os
 from geomloss import SamplesLoss
 import numpy as np
 import matplotlib
+from matplotlib import collections as mc
 import matplotlib.pyplot as plt
 import matplotlib.animation
 import torch
 import trimesh
 import ot
-import glob
-import pdb
-from scipy.spatial.distance import squareform
-from torch import nn
-
 import pandas as pd
 import plotly
 import plotly.express as px
 import plotly.graph_objs as go
-from plotly import tools
-from plotly.graph_objs import * #all the types of plots that we will plot here
-# plotly.offline.init_notebook_mode()
+from plotly.graph_objs import Figure, Layout, Scatter3d
+from scipy.spatial.distance import squareform
+from torch import nn
+
 
 use_cuda = torch.cuda.is_available()
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -39,14 +37,19 @@ def ezshow(dat, col='green'):
         # raise NameError("asdf")
         raise Exception("incorrect dimension")
     plt.axis('equal')
-    
+
+
 def ezshow3D(xyz, col='rgb(0,0,210)', alpha=.2, size=3, show=False):
-    trace = Scatter3d(x=xyz[:,0],y=xyz[:,1],z=xyz[:,2],mode='markers',marker=dict(size=size, color=col, colorscale='Viridis', opacity=alpha ))
+    trace = Scatter3d(x=xyz[:, 0], y=xyz[:, 1], z=xyz[:, 2], mode='markers',
+                      marker=dict(size=size, color=col, colorscale='Viridis',
+                                  opacity=alpha))
     if show:
-        layout = Layout(margin=dict(l=0,r=0,b=0,t=0),scene_dragmode='orbit',scene=dict(aspectmode='data'))
+        layout = Layout(margin=dict(l=0, r=0, b=0, t=0),
+                        scene_dragmode='orbit', scene=dict(aspectmode='data'))
         fig = Figure(data=[trace], layout=layout)
         fig.show()
     return trace
+
 
 class SpecialLosses():
     def __init(self):
@@ -165,9 +168,8 @@ class ImageDataset():
         z_target /= max(BB1.mac)
         z_target /= 1.1  # adds buffer to the keyframes from -1,1 border.
 
-        # lambda transform to apply on other things if needed
-        transform = lambda x : (x-BB0.C)/max(BB1.mac)/1.1
-        
+        def transform(x): return (x - BB0.C) / max(BB1.mac) / 1.1
+
         return z_target, transform
 
 
@@ -175,82 +177,85 @@ class MeshDataset():
     def __init__(self, mesh_file):
         self.mesh = trimesh.load(mesh_file)
         self.mesh_file = mesh_file
-    
+
     def getCacheName(mesh_file):
         rname, ext = os.path.splitext(mesh_file)
         fname = os.path.basename(rname)
         dname = os.path.dirname(rname)
-        return os.path.join(dname,"." + fname + "_pointstore") + ext
-    
+        return os.path.join(dname, f".{fname}_pointstore") + ext
+
     def clearCache(self):
         cacheName = MeshDataset.getCacheName(self.mesh_file)
         if os.path.exists(cacheName):
             os.remove(cacheName)
 
     # saves/loads sampled points
-    def sample(self, n_inner=70, n_surface=30, combined = False):
+    def sample(self, n_inner=70, n_surface=30, combined=False):
         # load cache. check for already sampled points.
         cacheName = MeshDataset.getCacheName(self.mesh_file)
         if os.path.exists(cacheName):
             cdict = torch.load(cacheName)
         else:
-            cdict = {'pts_inner':np.empty((0,3)), 'pts_surface':np.empty((0,3))}
+            cdict = {'pts_inner': np.empty(
+                (0, 3)), 'pts_surface': np.empty((0, 3))}
         old_pts_inner = cdict["pts_inner"]
         old_pts_surface = cdict["pts_surface"]
-        
+
         # draw point samples to fill cache
-        n_new_pts_inner = max(n_inner - old_pts_inner.shape[0],0)
-        n_new_pts_surface = max(n_surface - old_pts_surface.shape[0],0)
-        new_pts_inner, new_pts_surface = self.sample_new(n_inner=n_new_pts_inner, n_surface=n_new_pts_surface)
-        
+        n_new_pts_inner = max(n_inner - old_pts_inner.shape[0], 0)
+        n_new_pts_surface = max(n_surface - old_pts_surface.shape[0], 0)
+        new_pts_inner, new_pts_surface = self.sample_new(
+            n_inner=n_new_pts_inner, n_surface=n_new_pts_surface)
+
         # save cache
-        pts_inner = np.append(old_pts_inner, new_pts_inner,axis=0)
-        pts_surface = np.append(old_pts_surface, new_pts_surface,axis=0)
+        pts_inner = np.append(old_pts_inner, new_pts_inner, axis=0)
+        pts_surface = np.append(old_pts_surface, new_pts_surface, axis=0)
         if n_new_pts_inner != 0 or n_new_pts_surface != 0:
-            cdict = {'pts_inner':pts_inner,'pts_surface':pts_surface}
+            cdict = {'pts_inner': pts_inner, 'pts_surface': pts_surface}
             torch.save(cdict, cacheName)
-        
+
         # draw points needed from cache
         subsample_inds_inner = torch.randperm(pts_inner.shape[0])[:n_inner]
-        subsample_inds_surface = torch.randperm(pts_surface.shape[0])[:n_surface]
-        
-        inner_toreturn = pts_inner[subsample_inds_inner,:]
-        surface_toreturn = pts_surface[subsample_inds_surface,:]
+        subsample_inds_surface = torch.randperm(
+            pts_surface.shape[0])[:n_surface]
+
+        inner_toreturn = pts_inner[subsample_inds_inner, :]
+        surface_toreturn = pts_surface[subsample_inds_surface, :]
         if not combined:
             return inner_toreturn, surface_toreturn
         else:
             return np.append(inner_toreturn, surface_toreturn, axis=0)
-        
+
     def sample_new(self, n_inner=70, n_surface=30):
         pts_surface, _ = trimesh.sample.sample_surface(self.mesh, n_surface)
         pts_inner = trimesh.sample.volume_mesh(self.mesh, n_inner*10)[:n_inner]
 
         return pts_inner, pts_surface
-    
+
     def plotly_trace(self, color=None, opacity=.8):
         X = self.mesh.vertices
         T = self.mesh.faces
         fc = None
-        
+
         if color is None:
-            fc = (X[T[:,0],:]+X[T[:,1],:]+X[T[:,2],:])/3
-        # lighting=dict(ambient= 0.55,diffuse= 0.5,specular= 0.75,roughness=0.25,fresnel= 0.25)
-        gob = go.Mesh3d(x=X[:,0], y=X[:,1], z=X[:,2], i=T[:,0], j=T[:,1], k=T[:,2], color=color, opacity=opacity, facecolor = fc, flatshading=True)
+            fc = (X[T[:, 0], :]+X[T[:, 1], :]+X[T[:, 2], :])/3
+        gob = go.Mesh3d(x=X[:, 0], y=X[:, 1], z=X[:, 2], i=T[:, 0], j=T[:, 1],
+                        k=T[:, 2], color=color, opacity=opacity, facecolor=fc,
+                        flatshading=True)
         return gob
-    
+
     def meshArrayToTraces(meshArray, color=None, opacity=.8, show=False):
         traces = []
-        
+
         if color is None:
             color = []
             cs = np.array([1, .1, .1])  # start color
             cf = np.array([1, .64, .2])  # end color
-            colorinterp = np.linspace(0,1,len(meshArray))
+            colorinterp = np.linspace(0, 1, len(meshArray))
             for i in range(len(meshArray)):
                 ct = np.round(((1-colorinterp[i])*cs + cf*colorinterp[i])*255)
                 color.append(f"rgb({ct[0]:03},{ct[1]:03},{ct[2]:03})")
-            
-        
+
         for i in range(len(meshArray)):
             if type(color) is list:
                 col = color[0]
@@ -258,30 +263,33 @@ class MeshDataset():
                     col = color[i]
             else:
                 col = color
-            traces.append(meshArray[i].plotly_trace(color=col, opacity=opacity))
-        
+            traces.append(meshArray[i].plotly_trace(
+                color=col, opacity=opacity))
+
         if show:
-            layout = Layout(margin=dict(l=0,r=0,b=0,t=0),scene_dragmode='orbit',scene=dict(aspectmode='data'))
-            Figure(data=traces, layout = layout).show()
-    
+            layout = Layout(margin=dict(l=0, r=0, b=0, t=0),
+                            scene_dragmode='orbit',
+                            scene=dict(aspectmode='data'))
+            Figure(data=traces, layout=layout).show()
+
         return traces
-        
-    
-    def meshArrayToPoints(meshArray, inner_percentage, n_total, combined = True):
-        
+
+    def meshArrayToPoints(meshArray, inner_percentage, n_total, combined=True):
+
         n_inner = round(n_total*inner_percentage)
         n_surface = n_total - n_inner
-        pts_inner = np.zeros((len(meshArray),n_inner,3))
-        pts_surface = np.zeros((len(meshArray),n_surface,3))
+        pts_inner = np.zeros((len(meshArray), n_inner, 3))
+        pts_surface = np.zeros((len(meshArray), n_surface, 3))
         for i in range(len(meshArray)):
-            pts_inner[i,:,:], pts_surface[i,:,:] = meshArray[i].sample(n_inner=n_inner, n_surface=n_surface, combined = False);
-        
+            pts_inner[i, :, :], pts_surface[i, :, :] = meshArray[i].sample(
+                n_inner=n_inner, n_surface=n_surface, combined=False)
+
         if combined:
             return np.concatenate((pts_inner, pts_surface), axis=1)
-        
+
         return pts_inner, pts_surface
-        
-        
+
+
 class BoundingBox():
     # use like:
     # BB = BoundingBox(z_target);
@@ -306,10 +314,10 @@ class BoundingBox():
         # extended bounding box.
         emic = ((self.mic-self.C)*bbscale+self.C)
         emac = ((self.mac-self.C)*bbscale+self.C)
-        
+
         if returnNP:
             return emic.cpu().detach().numpy(), emac.cpu().detach().numpy()
-        
+
         return emic, emac
 
     def sampleuniform(self, t_N=30, x_N=10, y_N=11, z_N=12, bbscale=1.1):
@@ -430,20 +438,306 @@ class SaveTrajectory():
 
     def save_trajectory(model, z_target_full, savedir='results/outcache/',
                         savename='', nsteps=20, dpiv=100, n=4000, alpha=.5,
-                        ot_type=2, writeTracers=False, rbf=True, meshArray=None):
+                        ot_type=2, writeTracers=False, rbf=True,
+                        meshArray=None, sigma=None, knn=20):
         # handler for different dimensions
-        if z_target_full.shape[1]==2:
+        if z_target_full.shape[2] == 2:
             SaveTrajectory.save_trajectory_2d(model, z_target_full, savedir,
-                        savename, nsteps, dpiv, n, alpha,
-                        ot_type, writeTracers, rbf)
+                                              savename, nsteps, dpiv, n, alpha,
+                                              ot_type, writeTracers, rbf,
+                                              sigma, knn)
         else:
             SaveTrajectory.save_trajectory_3d(model, z_target_full, savedir,
-                        savename, nsteps, dpiv, n, alpha,
-                        ot_type, writeTracers, rbf, meshArray=meshArray)
-        
+                                              savename, nsteps, dpiv, n, alpha,
+                                              ot_type, writeTracers,
+                                              meshArray=meshArray)
+
+    def save_trajectory_2d(model, z_target_full, savedir='results/outcache/',
+                           savename='', nsteps=20, dpiv=100, n=4000, alpha=.5,
+                           ot_type=2, writeTracers=False, rbf=True,
+                           sigma=None, knn=20):
+        z_target_full = z_target_full.detach()
+
+        with torch.no_grad():
+            # save model
+            if not os.path.exists(savedir+'models/'):
+                os.makedirs(savedir+'models/')
+            model.save_state(fn=savedir + 'models/state_' + savename + '.tar')
+
+            # save trajectory video0
+            if n > z_target_full.shape[1]:
+                n = z_target_full.shape[1]
+            subsample_inds = torch.randperm(z_target_full.shape[1])[:n]
+            z_target = z_target_full[:, subsample_inds, :]
+
+            T = z_target.shape[0]
+            integration_times = torch.linspace(0, T-1, nsteps).to(device)
+            x_traj_reverse_t = model(
+                z_target[T-1, :, :], integration_times, reverse=True)
+            x_traj_forward_t = model(
+                z_target[0, :, :], integration_times, reverse=False)
+            x_traj_reverse = x_traj_reverse_t.cpu().numpy()
+            x_traj_forward = x_traj_forward_t.cpu().numpy()
+
+            allpoints = torch.cat(
+                (x_traj_reverse_t, x_traj_forward_t, z_target), dim=0)
+            BB = BoundingBox(allpoints, square=False)
+            emic, emac = BB.extendedBB(1.1)
+            z_sample = BB.sampleuniform(t_N=1, x_N=20, y_N=20)
+            z_sample_d = z_sample.cpu().numpy()
+
+            # forward
+            moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
+            fig, (ax) = plt.subplots(1, 1)
+            with moviewriter.saving(fig, savedir+'forward_'+savename+'.mp4', dpiv):
+                for i in range(nsteps):
+                    for t in range(T):
+                        plt.scatter(
+                            z_target.cpu().numpy()[t, :, 0],
+                            z_target.cpu().numpy()[t, :, 1],
+                            s=10, alpha=alpha, linewidths=0, c='green',
+                            edgecolors='black')
+                    x_traj = x_traj_forward
+
+                    # plot velocities
+                    z_dots_d = model.velfunc.get_z_dot(
+                        z_sample[:, 0]*0.0 + integration_times[i],
+                        z_sample[:, 1:]).cpu().numpy()
+                    plt.quiver(z_sample_d[:, 1], z_sample_d[:, 2],
+                               z_dots_d[:, 0], z_dots_d[:, 1])
+                    plt.scatter(x_traj[i, :, 0], x_traj[i, :, 1], s=10,
+                                alpha=alpha, linewidths=0, c='blue',
+                                edgecolors='black')
+
+                    ax.axis('equal')
+                    ax.set(xlim=(emic[0].item(), emac[0].item()),
+                           ylim=(emic[1].item(), emac[1].item()))
+                    plt.axis('off')
+                    moviewriter.grab_frame()
+                    plt.clf()
+                moviewriter.finish()
+
+            # reverse
+            moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
+            with moviewriter.saving(fig, savedir+'rev_'+savename+'.mp4', dpiv):
+                for i in range(nsteps):
+                    for t in range(T):
+                        plt.scatter(
+                            z_target.cpu().numpy()[t, :, 0],
+                            z_target.cpu().numpy()[t, :, 1],
+                            s=10, alpha=alpha, linewidths=0, c='green',
+                            edgecolors='black')
+                    x_traj = x_traj_reverse
+
+                    # plot velocities
+                    z_dots_d = model.velfunc.get_z_dot(
+                        z_sample[:, 0]*0.0 + integration_times[(nsteps-1)-i],
+                        z_sample[:, 1:]).cpu().numpy()
+                    plt.quiver(z_sample_d[:, 1],
+                               z_sample_d[:, 2], -z_dots_d[:, 0], -z_dots_d[:, 1])
+                    plt.scatter(x_traj[i, :, 0], x_traj[i, :, 1], s=10,
+                                alpha=alpha, linewidths=0, c='blue',
+                                edgecolors='black')
+
+                    ax.axis('equal')
+                    ax.set(xlim=(emic[0].item(), emac[0].item()),
+                           ylim=(emic[1].item(), emac[1].item()))
+                    plt.axis('off')
+                    moviewriter.grab_frame()
+                    plt.clf()
+                moviewriter.finish()
+
+            # forward and back
+            ts = torch.linspace(0, 1, nsteps)
+            moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
+            x_trajs = torch.zeros(n, 2, (T-1)*(nsteps-1)+1)
+            t_trajs = torch.zeros((T-1)*(nsteps-1)+1)
+            trajsc = 0
+            indices = torch.arange(0, z_target.shape[1])
+            with moviewriter.saving(fig, savedir+'fb_'+savename+'.mp4', dpiv):
+                for tt in range(T-1):
+                    if tt > 0:
+                        # this permutation is needed to keep x_trajs continuous. otherwise at keyframes, the permutation gets reset.
+                        _fst, indices = MiscTransforms.OT_registration_POT_2D(
+                            x_traj_t, z_target[tt, :, :])
+                    integration_times = torch.linspace(
+                        tt, tt+1, nsteps).to(device)
+                    x_traj_reverse_t = model(
+                        z_target[tt+1, :, :], integration_times, reverse=True)
+                    x_traj_forward_t = model(
+                        z_target[tt, indices, :], integration_times, reverse=False)
+                    x_traj_reverse = x_traj_reverse_t.cpu().numpy()
+                    x_traj_forward = x_traj_forward_t.cpu().numpy()
+
+                    endstep = nsteps if tt == T-2 else nsteps-1
+                    for i in range(endstep):
+                        fs = x_traj_forward_t[i, :, :]
+                        ft = x_traj_reverse_t[(nsteps-1)-i, :, :]
+
+                        # ground truth keyframes
+                        for t in range(T):
+                            plt.scatter(z_target.cpu().numpy()[t, :, 0],
+                                        z_target.cpu().numpy()[t, :, 1],
+                                        s=10, alpha=alpha, linewidths=0, c='green',
+                                        edgecolors='black')
+
+                        # plot velocities
+                        z_dots_d = model.velfunc.get_z_dot(
+                            z_sample[:, 0]*0.0 + integration_times[i],
+                            z_sample[:, 1:]).cpu().numpy()
+                        plt.quiver(z_sample_d[:, 1], z_sample_d[:, 2],
+                                   z_dots_d[:, 0], z_dots_d[:, 1], lw=.01)
+
+                        # forward and backwards separately
+                        fsp = fs.cpu().numpy()
+                        ftp = ft.cpu().numpy()
+                        plt.scatter(fsp[:, 0], fsp[:, 1], s=10, alpha=alpha,
+                                    linewidths=0, c='yellow', edgecolors='black')
+                        plt.scatter(ftp[:, 0], ftp[:, 1], s=10, alpha=alpha,
+                                    linewidths=0, c='orange', edgecolors='black')
+
+                        # W2 barycenter combination
+                        if ot_type == 1:
+                            # this registration isn't 1-1 on point clouds. don't know why currently.
+                            fst = MiscTransforms.OT_registration(fs, ft)
+                        elif ot_type == 2:
+                            # full linear program version of OT. slightly slower than geomloss but frankly not that slow compared to other steps in the pipeline.
+                            fst, indices = MiscTransforms.OT_registration_POT_2D(
+                                fs, ft)
+
+                        x_traj_t = (fs*(1-ts[i]) + fst*ts[i])
+                        x_traj = x_traj_t.cpu().numpy()
+                        plt.scatter(x_traj[:, 0], x_traj[:, 1], s=10, alpha=alpha,
+                                    linewidths=0, c='blue', edgecolors='black')
+
+                        x_trajs[:, :, trajsc] = x_traj_t
+                        t_trajs[trajsc] = integration_times[i]
+                        trajsc += 1
+
+                        ax.axis('equal')
+                        plt.axis('equal')
+                        ax.set(xlim=(emic[0].item(), emac[0].item()),
+                               ylim=(emic[1].item(), emac[1].item()))
+                        plt.axis('off')
+                        moviewriter.grab_frame()
+                        plt.clf()
+                moviewriter.finish()
+            plt.close(fig)
+
+            if writeTracers:
+                fig, (ax) = plt.subplots(1, 1)
+                n = x_trajs.shape[0]  # num particles
+                d = x_trajs.shape[1]  # dimension
+                nf = x_trajs.shape[2]  # number of frames in full trajectory
+                nft = torch.linspace(0, 1, nf)  # color tracers
+                cs = torch.tensor((.3, .5, 1))  # start color
+                cf = torch.tensor((.2, 1, .2))  # end color
+                x_trajs_f = x_trajs.transpose(1, 2)
+                nanc = torch.zeros(n, 1, d)*float("nan")
+                moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
+                fig.tight_layout()
+                ax.axis('equal')
+                ax.set(xlim=(emic[0].item(), emac[0].item()),
+                       ylim=(emic[1].item(), emac[1].item()))
+                ax.axis('off')
+                dullingfactor = .4
+                with moviewriter.saving(fig, savedir + 'traj_'+savename+'.mp4',
+                                        dpiv):
+                    keyframe_percentage_curr = -1
+                    for t in range(0, nf):
+                        ctt = (cs*(1-nft[t])+cf*nft[t])
+                        dctt = (cs*(1-nft[t])+cf*nft[t])*dullingfactor
+                        ct = (ctt[0].item(), ctt[1].item(), ctt[2].item())
+                        dct = (dctt[0].item(), dctt[1].item(), dctt[2].item())
+
+                        # plot velocities
+                        z_dots_d = model.velfunc.get_z_dot(
+                            z_sample[:, 0]*0.0 + t_trajs[t],
+                            z_sample[:, 1:]).cpu().numpy()
+                        qvr = ax.quiver(z_sample_d[:, 1], z_sample_d[:, 2],
+                                        z_dots_d[:, 0], z_dots_d[:, 1],
+                                        headwidth=1, headlength=3,
+                                        headaxislength=2)
+
+                        # plot keyframes as tracers pass by
+                        keyframe_percentage = np.floor(t/(nf-1.)*(T-1))
+                        if keyframe_percentage != keyframe_percentage_curr:
+                            keyframe_percentage_curr = keyframe_percentage
+                            tt = int(keyframe_percentage)
+                            if rbf and False:
+                                pass
+                            else:
+                                ax.scatter(
+                                    z_target.cpu().numpy()[tt, :, 0],
+                                    z_target.cpu().numpy()[tt, :, 1],
+                                    s=10, alpha=1, linewidths=0, color=dct,
+                                    zorder=2)
+
+                        if t > 0:
+                            # plot tracers. Using the [xy;xy;nan] trick from matlab to plot all segments of a timestep at once. it's faster than a for loop at least.
+                            segment_t = x_trajs_f[:, t -
+                                                  1:t+1].cpu().numpy()
+                            lc = mc.LineCollection(segment_t, color=ct, lw=0.5,
+                                                   zorder=1)
+                            ax.add_collection(lc)
+
+                        # plot endpoints
+                        if rbf:
+                            points = x_trajs[:, :, t].to(device)
+
+                            if sigma is not None:
+                                sigmas = torch.tensor(sigma).to(device)
+                            else:
+                                pdists = torch.tensor(
+                                    squareform(torch.pdist(points.cpu()))
+                                ).to(device)
+                                sigmas = pdists.topk(
+                                    knn+1, largest=False).values[:, -1]
+
+                            xs = torch.linspace(
+                                emic[0].item(), emac[0].item(),
+                                1000).to(device)
+                            ys = torch.linspace(
+                                emic[1].item(), emac[1].item(),
+                                1000).to(device)
+                            grid = torch.stack(torch.meshgrid(xs, ys,
+                                                              indexing='xy'),
+                                               dim=-1)
+                            dists = (grid[:, :, None] -
+                                     points[None, None]).norm(p=2, dim=-1)
+                            zs = torch.exp(
+                                -(dists.pow(2) /
+                                  (2 * sigmas[None, None]**2))).sum(-1)
+                            zs -= zs.min()
+                            zs /= zs.max()
+
+                            zs = zs.cpu().numpy()[:, :, None]
+                            color = np.array(dct + (1,))
+                            im = zs * color + (1-zs) * np.array([1, 1, 1, 0])
+                            im = (im * 255).astype(np.uint8)
+
+                            scr = ax.imshow(
+                                im, extent=(emic[0].item(), emac[0].item(),
+                                            emic[1].item(), emac[1].item()),
+                                origin='lower', zorder=2)
+
+                        else:
+                            endpoints = x_trajs[:, :, t].cpu().numpy()
+                            scr = ax.scatter(endpoints[:, 0], endpoints[:, 1],
+                                             s=10, alpha=1, linewidths=0,
+                                             color=dct, zorder=2, edgecolors='k')
+
+                        moviewriter.grab_frame()
+                        scr.remove()
+                        qvr.remove()
+                moviewriter.finish()
+                plt.close(fig)
+
+        return x_trajs
+
     def save_trajectory_3d(model, z_target_full, savedir='results/outcache/',
-                        savename='', nsteps=20, dpiv=100, n=4000, alpha=.2,
-                        ot_type=2, writeTracers=False, rbf=True, meshArray=None):
+                           savename='', nsteps=20, dpiv=100, n=4000, alpha=.2,
+                           ot_type=2, writeTracers=False, meshArray=None):
         # initialize
         if not os.path.exists(savedir+'models/'):
             os.makedirs(savedir+'models/')
@@ -451,9 +745,11 @@ class SaveTrajectory():
         dim = z_target_full.shape[2]
         T = z_target_full.shape[0]
         colormap = plotly.express.colors.sequential.Viridis
-        keytraces = MeshDataset.meshArrayToTraces(meshArray, color='blue', opacity=.05, show=False) if meshArray is not None else []
-        layout = Layout(margin=dict(l=0,r=0,b=0,t=0),scene_dragmode='orbit',scene=dict(aspectmode='data', aspectratio=dict(x=1,y=1,z=1)))
-        
+        keytraces = MeshDataset.meshArrayToTraces(
+            meshArray, color='blue', opacity=.05, show=False) if meshArray is not None else []
+        layout = Layout(margin=dict(l=0, r=0, b=0, t=0), scene_dragmode='orbit', scene=dict(
+            aspectmode='data', aspectratio=dict(x=1, y=1, z=1)))
+
         # subsample points
         if n > z_target_full.shape[1]:
             n = z_target_full.shape[1]
@@ -470,52 +766,61 @@ class SaveTrajectory():
         x_traj_forward = x_traj_forward_t.cpu().detach().numpy()
 
         # get bounding box of trajectory
-        BB = BoundingBox(torch.cat((x_traj_reverse_t, x_traj_forward_t, z_target), dim=0).detach(), square=False)
+        BB = BoundingBox(torch.cat(
+            (x_traj_reverse_t, x_traj_forward_t, z_target), dim=0).detach(), square=False)
         emic, emac = BB.extendedBB(1.1, returnNP=True)
         z_sample = BB.sampleuniform(t_N=1, x_N=20, y_N=20)
         z_sample_d = z_sample.cpu().detach().numpy()
-        BB_trace = Scatter3d(name="",visible=True,showlegend=False,opacity=0,hoverinfo='none',x=[emic[0],emac[0]],y=[emic[1],emac[1]],z=[emic[2],emac[2]])
-        
-        ## FORWARD
+        BB_trace = Scatter3d(name="", visible=True, showlegend=False, opacity=0, hoverinfo='none', x=[
+                             emic[0], emac[0]], y=[emic[1], emac[1]], z=[emic[2], emac[2]])
+
+        # FORWARD
         nframes = x_traj_forward_t.shape[0]
-        xyz = x_traj_forward_t.reshape((nframes*n,dim)).cpu().detach().numpy() 
-        framenum = torch.repeat_interleave(torch.arange(nframes),n).cpu().detach().numpy() 
-        df = pd.DataFrame(dict(xp=xyz[:,0], yp=xyz[:,1], zp=xyz[:,2], framenum = framenum, size = 1, colors = nframes-framenum ))
-        # plot animation 
+        xyz = x_traj_forward_t.reshape((nframes*n, dim)).cpu().detach().numpy()
+        framenum = torch.repeat_interleave(
+            torch.arange(nframes), n).cpu().detach().numpy()
+        df = pd.DataFrame(dict(xp=xyz[:, 0], yp=xyz[:, 1], zp=xyz[:, 2],
+                               framenum=framenum, size=1, colors=nframes-framenum))
+        # plot animation
         fig = px.scatter_3d(df, x="xp", y="yp", z="zp", opacity=alpha,
-                            animation_frame="framenum", # symbol = "framenum",
-                            size="size", size_max = 10, 
-                            color="colors", color_continuous_scale = colormap, range_color = [-nframes*1, nframes*.9])
+                            animation_frame="framenum",  # symbol = "framenum",
+                            size="size", size_max=10,
+                            color="colors", color_continuous_scale=colormap, range_color=[-nframes*1, nframes*.9])
         # remove marker outlines from animation
         for i in range(len(fig.frames)):
-            fig.frames[i].data[0]['marker']['line']=dict(width=0,color='DarkSlateGrey')
+            fig.frames[i].data[0]['marker']['line'] = dict(
+                width=0, color='DarkSlateGrey')
         # plot background
         for i in range(len(keytraces)):
             fig.add_trace(keytraces[i])
         fig.add_trace(BB_trace)
         fig.update_layout(layout)
         plotly.offline.plot(fig, filename=savedir+'forward_'+savename+'.html')
-        
-        ## REVERSE
+
+        # REVERSE
         nframes = x_traj_reverse_t.shape[0]
-        xyz = x_traj_reverse_t.reshape((nframes*n,dim)).cpu().detach().numpy() 
-        framenum = torch.repeat_interleave(torch.arange(nframes),n).cpu().detach().numpy() 
-        df = pd.DataFrame(dict(xp=xyz[:,0], yp=xyz[:,1], zp=xyz[:,2], framenum = framenum, size = 1, colors = nframes-framenum ))
-        # plot animation 
+        xyz = x_traj_reverse_t.reshape((nframes*n, dim)).cpu().detach().numpy()
+        framenum = torch.repeat_interleave(
+            torch.arange(nframes), n).cpu().detach().numpy()
+        df = pd.DataFrame(dict(xp=xyz[:, 0], yp=xyz[:, 1], zp=xyz[:, 2],
+                               framenum=framenum, size=1, colors=nframes-framenum))
+        # plot animation
         fig = px.scatter_3d(df, x="xp", y="yp", z="zp", opacity=alpha,
-                            animation_frame="framenum", # symbol = "framenum",
-                            size="size", size_max = 10, 
-                            color="colors", color_continuous_scale = colormap, range_color = [-nframes*1, nframes*.9])
+                            animation_frame="framenum",  # symbol = "framenum",
+                            size="size", size_max=10,
+                            color="colors", color_continuous_scale=colormap, range_color=[-nframes*1, nframes*.9])
         # remove marker outlines from animation
         for i in range(len(fig.frames)):
-            fig.frames[i].data[0]['marker']['line']=dict(width=0,color='DarkSlateGrey')
+            fig.frames[i].data[0]['marker']['line'] = dict(
+                width=0, color='DarkSlateGrey')
         # plot background
         for i in range(len(keytraces)):
             fig.add_trace(keytraces[i])
         fig.add_trace(BB_trace)
-        fig.update_layout(margin=dict(l=0,r=0,b=0,t=0),scene_dragmode='orbit',scene=dict(aspectmode='data', aspectratio=dict(x=1,y=1,z=1)))
+        fig.update_layout(margin=dict(l=0, r=0, b=0, t=0), scene_dragmode='orbit', scene=dict(
+            aspectmode='data', aspectratio=dict(x=1, y=1, z=1)))
         plotly.offline.plot(fig, filename=savedir+'rev_'+savename+'.html')
-        
+
         # FORWARD AND BACK
         # initialize variables for trajectory
         ts = torch.linspace(0, 1, nsteps)
@@ -524,7 +829,7 @@ class SaveTrajectory():
         trajsc = 0
         indices = torch.arange(0, z_target.shape[1])
         # initialize variables for plotly
-        xyz = np.zeros((0,dim))
+        xyz = np.zeros((0, dim))
         framenum = np.zeros(0)
         frame_counter = 0
         colorgroup = np.zeros(0)
@@ -544,12 +849,12 @@ class SaveTrajectory():
             for i in range(endstep):
                 fs = x_traj_forward_t[i, :, :]
                 ft = x_traj_reverse_t[(nsteps-1)-i, :, :]
-                fsp=fs.cpu().detach().numpy()
-                ftp=ft.cpu().detach().numpy()
+                fsp = fs.cpu().detach().numpy()
+                ftp = ft.cpu().detach().numpy()
 
                 # W2 barycenter combination
                 if ot_type == 1:
-                    # this registration isn't always 1-1 on point clouds. 
+                    # this registration isn't always 1-1 on point clouds.
                     fst = MiscTransforms.OT_registration(
                         fs.detach(), ft.detach())
                 elif ot_type == 2:
@@ -559,296 +864,42 @@ class SaveTrajectory():
 
                 x_traj_t = (fs*(1-ts[i]) + fst*ts[i])
                 x_traj = x_traj_t.cpu().detach().numpy()
-                
+
                 x_trajs[:, :, trajsc] = x_traj_t
                 t_trajs[trajsc] = integration_times[i]
                 trajsc += 1
 
                 # record into arrays for plotly
-                xyz = np.concatenate((xyz, fsp), axis = 0)
-                xyz = np.concatenate((xyz, ftp), axis = 0)
-                xyz = np.concatenate((xyz, x_traj), axis = 0)
-                framenum = np.concatenate((framenum, np.ones(fs.shape[0]+ft.shape[0]+x_traj.shape[0])*frame_counter), axis = 0)
-                colorgroup = np.concatenate((colorgroup, np.ones(fs.shape[0])*2.4), axis = 0)
-                colorgroup = np.concatenate((colorgroup, np.ones(ft.shape[0])*2.6), axis = 0)
-                colorgroup = np.concatenate((colorgroup, np.ones(x_traj.shape[0])*1.7), axis = 0)
+                xyz = np.concatenate((xyz, fsp), axis=0)
+                xyz = np.concatenate((xyz, ftp), axis=0)
+                xyz = np.concatenate((xyz, x_traj), axis=0)
+                framenum = np.concatenate((framenum, np.ones(
+                    fs.shape[0]+ft.shape[0]+x_traj.shape[0])*frame_counter), axis=0)
+                colorgroup = np.concatenate(
+                    (colorgroup, np.ones(fs.shape[0])*2.4), axis=0)
+                colorgroup = np.concatenate(
+                    (colorgroup, np.ones(ft.shape[0])*2.6), axis=0)
+                colorgroup = np.concatenate(
+                    (colorgroup, np.ones(x_traj.shape[0])*1.7), axis=0)
                 frame_counter = frame_counter+1
-        df = pd.DataFrame(dict(xp=xyz[:,0], yp=xyz[:,1], zp=xyz[:,2], framenum = framenum, size = 1, colorgroup = colorgroup ))
-        # plot animation 
+        df = pd.DataFrame(dict(xp=xyz[:, 0], yp=xyz[:, 1], zp=xyz[:, 2],
+                               framenum=framenum, size=1, colorgroup=colorgroup))
+        # plot animation
         fig = px.scatter_3d(df, x="xp", y="yp", z="zp", opacity=alpha,
-                            animation_frame="framenum", # symbol = "framenum",
-                            size="size", size_max = 10, 
-                            color="colorgroup", color_continuous_scale = plotly.express.colors.sequential.Turbo, range_color = [0, 4])
+                            animation_frame="framenum",  # symbol = "framenum",
+                            size="size", size_max=10,
+                            color="colorgroup", color_continuous_scale=plotly.express.colors.sequential.Turbo, range_color=[0, 4])
         # remove marker outlines from animation
         for i in range(len(fig.frames)):
-            fig.frames[i].data[0]['marker']['line']=dict(width=0,color='DarkSlateGrey')
+            fig.frames[i].data[0]['marker']['line'] = dict(
+                width=0, color='DarkSlateGrey')
         # plot background
         for i in range(len(keytraces)):
             fig.add_trace(keytraces[i])
         fig.add_trace(BB_trace)
-        fig.update_layout(margin=dict(l=0,r=0,b=0,t=0),scene_dragmode='orbit',scene=dict(aspectmode='data', aspectratio=dict(x=1,y=1,z=1)))
+        fig.update_layout(margin=dict(l=0, r=0, b=0, t=0), scene_dragmode='orbit', scene=dict(
+            aspectmode='data', aspectratio=dict(x=1, y=1, z=1)))
         plotly.offline.plot(fig, filename=savedir+'fb_'+savename+'.html')
-        
-        return x_trajs
-
-    def save_trajectory_2d(model, z_target_full, savedir='results/outcache/',
-                        savename='', nsteps=20, dpiv=100, n=4000, alpha=.5,
-                        ot_type=2, writeTracers=False, rbf=True):
-        # save model
-        if not os.path.exists(savedir+'models/'):
-            os.makedirs(savedir+'models/')
-        model.save_state(fn=savedir + 'models/state_' + savename + '.tar')
-
-        # save trajectory video0
-        if n > z_target_full.shape[1]:
-            n = z_target_full.shape[1]
-        subsample_inds = torch.randperm(z_target_full.shape[1])[:n]
-        z_target = z_target_full[:, subsample_inds, :]
-
-        T = z_target.shape[0]
-        integration_times = torch.linspace(0, T-1, nsteps).to(device)
-        x_traj_reverse_t = model(
-            z_target[T-1, :, :], integration_times, reverse=True)
-        x_traj_forward_t = model(
-            z_target[0, :, :], integration_times, reverse=False)
-        x_traj_reverse = x_traj_reverse_t.cpu().detach().numpy()
-        x_traj_forward = x_traj_forward_t.cpu().detach().numpy()
-
-        allpoints = torch.cat(
-            (x_traj_reverse_t, x_traj_forward_t, z_target), dim=0).detach()
-        BB = BoundingBox(allpoints.detach(), square=False)
-        emic, emac = BB.extendedBB(1.1, returnNP = True)
-        z_sample = BB.sampleuniform(t_N=1, x_N=20, y_N=20)
-        z_sample_d = z_sample.cpu().detach().numpy()
-
-        # forward
-        moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
-        fig, (ax) = plt.subplots(1, 1)
-        with moviewriter.saving(fig, savedir+'forward_'+savename+'.mp4', dpiv):
-            for i in range(nsteps):
-                for t in range(T):
-                    plt.scatter(
-                        z_target.cpu().detach().numpy()[t, :, 0],
-                        z_target.cpu().detach().numpy()[t, :, 1],
-                        s=10, alpha=alpha, linewidths=0, c='green',
-                        edgecolors='black')
-                x_traj = x_traj_forward
-
-                # plot velocities
-                z_dots_d = model.velfunc.get_z_dot(
-                    z_sample[:, 0]*0.0 + integration_times[i],
-                    z_sample[:, 1:]).cpu().detach().numpy()
-                plt.quiver(z_sample_d[:, 1], z_sample_d[:, 2],
-                           z_dots_d[:, 0], z_dots_d[:, 1])
-                plt.scatter(x_traj[i, :, 0], x_traj[i, :, 1], s=10,
-                            alpha=alpha, linewidths=0, c='blue',
-                            edgecolors='black')
-
-                ax.axis('equal')
-                ax.set(xlim=(emic[0], emac[0]),
-                       ylim=(emic[1], emac[1]))
-                plt.axis('off')
-                moviewriter.grab_frame()
-                plt.clf()
-            moviewriter.finish()
-
-        # reverse
-        moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
-        with moviewriter.saving(fig, savedir+'rev_'+savename+'.mp4', dpiv):
-            for i in range(nsteps):
-                for t in range(T):
-                    plt.scatter(
-                        z_target.cpu().detach().numpy()[t, :, 0],
-                        z_target.cpu().detach().numpy()[t, :, 1],
-                        s=10, alpha=alpha, linewidths=0, c='green',
-                        edgecolors='black')
-                x_traj = x_traj_reverse
-
-                # plot velocities
-                z_dots_d = model.velfunc.get_z_dot(
-                    z_sample[:, 0]*0.0 + integration_times[(nsteps-1)-i],
-                    z_sample[:, 1:]).cpu().detach().numpy()
-                plt.quiver(z_sample_d[:, 1],
-                           z_sample_d[:, 2], -z_dots_d[:, 0], -z_dots_d[:, 1])
-                plt.scatter(x_traj[i, :, 0], x_traj[i, :, 1], s=10,
-                            alpha=alpha, linewidths=0, c='blue',
-                            edgecolors='black')
-
-                ax.axis('equal')
-                ax.set(xlim=(emic[0], emac[0]),
-                       ylim=(emic[1], emac[1]))
-                plt.axis('off')
-                moviewriter.grab_frame()
-                plt.clf()
-            moviewriter.finish()
-
-        # forward and back
-        ts = torch.linspace(0, 1, nsteps)
-        moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
-        x_trajs = torch.zeros(n, 2, (T-1)*(nsteps-1)+1)
-        t_trajs = torch.zeros((T-1)*(nsteps-1)+1)
-        trajsc = 0
-        indices = torch.arange(0, z_target.shape[1])
-        with moviewriter.saving(fig, savedir+'fb_'+savename+'.mp4', dpiv):
-            for tt in range(T-1):
-                if tt > 0:
-                    # this permutation is needed to keep x_trajs continuous. otherwise at keyframes, the permutation gets reset.
-                    _fst, indices = MiscTransforms.OT_registration_POT_2D(
-                        x_traj_t.detach(), z_target[tt, :, :].detach())
-                integration_times = torch.linspace(tt, tt+1, nsteps).to(device)
-                x_traj_reverse_t = model(
-                    z_target[tt+1, :, :], integration_times, reverse=True)
-                x_traj_forward_t = model(
-                    z_target[tt, indices, :], integration_times, reverse=False)
-                x_traj_reverse = x_traj_reverse_t.cpu().detach().numpy()
-                x_traj_forward = x_traj_forward_t.cpu().detach().numpy()
-
-                endstep = nsteps if tt == T-2 else nsteps-1
-                for i in range(endstep):
-                    fs = x_traj_forward_t[i, :, :]
-                    ft = x_traj_reverse_t[(nsteps-1)-i, :, :]
-
-                    # ground truth keyframes
-                    for t in range(T):
-                        plt.scatter(z_target.cpu().detach().numpy()[t, :, 0],
-                                    z_target.cpu().detach().numpy()[t, :, 1],
-                                    s=10, alpha=alpha, linewidths=0, c='green',
-                                    edgecolors='black')
-
-                    # plot velocities
-                    z_dots_d = model.velfunc.get_z_dot(
-                        z_sample[:, 0]*0.0 + integration_times[i],
-                        z_sample[:, 1:]).cpu().detach().numpy()
-                    plt.quiver(z_sample_d[:, 1], z_sample_d[:, 2],
-                               z_dots_d[:, 0], z_dots_d[:, 1], lw=.01)
-
-                    # forward and backwards separately
-                    fsp = fs.cpu().detach().numpy()
-                    ftp = ft.cpu().detach().numpy()
-                    plt.scatter(fsp[:, 0], fsp[:, 1], s=10, alpha=alpha,
-                                linewidths=0, c='yellow', edgecolors='black')
-                    plt.scatter(ftp[:, 0], ftp[:, 1], s=10, alpha=alpha,
-                                linewidths=0, c='orange', edgecolors='black')
-
-                    # W2 barycenter combination
-                    if ot_type == 1:
-                        # this registration isn't 1-1 on point clouds. don't know why currently.
-                        fst = MiscTransforms.OT_registration(
-                            fs.detach(), ft.detach())
-                    elif ot_type == 2:
-                        # full linear program version of OT. slightly slower than geomloss but frankly not that slow compared to other steps in the pipeline.
-                        fst, indices = MiscTransforms.OT_registration_POT_2D(
-                            fs.detach(), ft.detach())
-
-                    x_traj_t = (fs*(1-ts[i]) + fst*ts[i])
-                    x_traj = x_traj_t.cpu().detach().numpy()
-                    plt.scatter(x_traj[:, 0], x_traj[:, 1], s=10, alpha=alpha,
-                                linewidths=0, c='blue', edgecolors='black')
-
-                    x_trajs[:, :, trajsc] = x_traj_t
-                    t_trajs[trajsc] = integration_times[i]
-                    trajsc += 1
-
-                    ax.axis('equal')
-                    plt.axis('equal')
-                    ax.set(xlim=(emic[0], emac[0]),
-                           ylim=(emic[1], emac[1]))
-                    plt.axis('off')
-                    moviewriter.grab_frame()
-                    plt.clf()
-            moviewriter.finish()
-        plt.close(fig)
-
-        if writeTracers:
-            fig, (ax) = plt.subplots(1, 1)
-            n = x_trajs.shape[0]  # num particles
-            d = x_trajs.shape[1]  # dimension
-            nf = x_trajs.shape[2]  # number of frames in full trajectory
-            nft = torch.linspace(0, 1, nf)  # color tracers
-            cs = torch.tensor((.3, .5, 1))  # start color
-            cf = torch.tensor((.2, 1, .2))  # end color
-            x_trajs_f = x_trajs.transpose(1, 2)
-            nanc = torch.zeros(n, 1, d)*float("nan")
-            moviewriter = matplotlib.animation.writers['ffmpeg'](fps=15)
-            ax.axis('equal')
-            ax.set(xlim=(emic[0], emac[0]),
-                   ylim=(emic[1], emac[1]))
-            ax.axis('off')
-            dullingfactor = .7
-            with moviewriter.saving(fig, savedir + 'traj_'+savename+'.mp4',
-                                    dpiv):
-                keyframe_percentage_curr = -1
-                for t in range(0, nf):
-                    ctt = (cs*(1-nft[t])+cf*nft[t])
-                    dctt = (cs*(1-nft[t])+cf*nft[t])*dullingfactor
-                    ct = (ctt[0].item(), ctt[1].item(), ctt[2].item())
-                    dct = (dctt[0].item(), dctt[1].item(), dctt[2].item())
-
-                    # plot velocities
-                    z_dots_d = model.velfunc.get_z_dot(
-                        z_sample[:, 0]*0.0 + t_trajs[t],
-                        z_sample[:, 1:]).cpu().detach().numpy()
-                    qvr = plt.quiver(z_sample_d[:, 1], z_sample_d[:, 2],
-                                     z_dots_d[:, 0], z_dots_d[:, 1],
-                                     headwidth=1, headlength=3,
-                                     headaxislength=2)
-
-
-                    # plot keyframes as tracers pass by
-                    keyframe_percentage = np.floor(t/(nf-1.)*(T-1))
-                    if keyframe_percentage != keyframe_percentage_curr:
-                        keyframe_percentage_curr = keyframe_percentage
-                        tt = int(keyframe_percentage)
-                        if rbf and False:
-                            pass
-                        else:
-                            plt.scatter(
-                                z_target.cpu().detach().numpy()[tt, :, 0],
-                                z_target.cpu().detach().numpy()[tt, :, 1],
-                                s=10, alpha=1, linewidths=0, color=dct,
-                                zorder=2)
-
-                    if t > 0:
-                        # plot tracers. Using the [xy;xy;nan] trick from matlab to plot all segments of a timestep at once. it's faster than a for loop at least.
-                        segment_t = x_trajs_f[:, t-1:t+1, :]
-                        testp = torch.cat(
-                            (segment_t, nanc), dim=1).reshape(-1, d).detach(
-                            ).cpu().numpy()
-                        plt.plot(testp[:, 0], testp[:, 1],
-                                 alpha=.3, lw=.5, color=ct, zorder=1)
-
-                    # plot endpoints
-                    if rbf or False:
-                        points = x_trajs[:, :, t].detach().cuda()
-                        pdists = torch.tensor(
-                            squareform(torch.pdist(points.cpu()))
-                        ).cuda()
-                        sigmas = pdists.topk(
-                            11, largest=False).values[:, -1]
-                        sigmas = sigmas*0 + 0.02
-                        xs = torch.linspace(-1, 1, 1000).cuda()
-                        ys = torch.linspace(-1, 1, 1000).cuda()
-                        grid = torch.stack(torch.meshgrid(xs, ys,
-                                                          indexing='xy'),
-                                           dim=-1)
-                        dists = (grid[:, :, None] -
-                                 points[None, None]).norm(p=2, dim=-1)
-                        zs = torch.exp(
-                            -(dists.pow(2) /
-                              (2 * sigmas[None, None]**2))).sum(-1)
-                        zs -= zs.min()
-                        zs /= zs.max()
-                    else:
-                        endpoints = x_trajs[:, :, t].detach().cpu().numpy()
-                        scr = plt.scatter(endpoints[:, 0], endpoints[:, 1],
-                                          s=10, alpha=1, linewidths=0,
-                                          color=dct, zorder=2, edgecolors='k')
-
-                    moviewriter.grab_frame()
-                    scr.remove()
-                    qvr.remove()
-            moviewriter.finish()
-            plt.close(fig)
 
         return x_trajs
 
@@ -868,7 +919,6 @@ class MiscTransforms():
         return zt
 
     def OT_registration(source, target):
-        
         # SCALING EFFECTS IF A PERMUTATION IS RECOVERED OR NOT
         Loss = SamplesLoss("sinkhorn", p=2, blur=0.001, scaling=0.99)
         x = source
@@ -907,15 +957,16 @@ class MiscTransforms():
         _vals, indices = Wd.transpose(0, 1).max(dim=0)
         return target[indices, :], indices
 
-    
     # MiscTransforms.fill_scene_caches("scenes", n_inner = 10000, n_surface = 10000)
-    def fill_scene_caches(scenedir, n_inner = 10000, n_surface = 10000):
+
+    def fill_scene_caches(scenedir, n_inner=10000, n_surface=10000):
         for scene in glob.glob(scenedir+"/*"):
             for objfile in glob.glob(scene+"/*.obj"):
                 print(objfile)
                 mesh = MeshDataset(objfile)
-                pts_inner, pts_surface = mesh.sample(n_inner=n_inner, n_surface=n_surface);
-    
+                pts_inner, pts_surface = mesh.sample(
+                    n_inner=n_inner, n_surface=n_surface)
+
     # CODE SNIPPET FOR DEBUGGING GEOMLOSS OT_REGISTRATION IF IT BUGS OUT.
     # import Utils; importlib.reload(Utils); from Utils import MiscTransforms
     # dic = torch.load("otdebug.tar");

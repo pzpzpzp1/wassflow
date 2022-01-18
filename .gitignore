@@ -3,10 +3,6 @@ imgs/*
 models/*
 __pycache__/*
 /viz_loss.jpg
-results/outcache/*
-results/experiment*
 points.tar
 ToFeydy.ipynb
-
-
-
+results
