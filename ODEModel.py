@@ -12,12 +12,12 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 class velocMLP(nn.Module):
     def __init__(self, in_features=3, hidden_features=512, hidden_layers=2,
                  out_features=2, sigmac=3, n_freq=70, tdiv=1,
-                 incrementalMask=True):
+                 incrementalMask=True, Tperiod=None):
         super(velocMLP, self).__init__()
 
         net = []
         imap = InputMapping(in_features, n_freq, sigma=sigmac,
-                            tdiv=tdiv, incrementalMask=incrementalMask)
+                            tdiv=tdiv, incrementalMask=incrementalMask, Tperiod=Tperiod)
         self.imap = imap
         net.append(imap)
         net.append(nn.Linear(imap.d_out, hidden_features))
@@ -91,7 +91,7 @@ class FfjordModel(torch.nn.Module):
 
     def __init__(self, in_features=3, hidden_features=512, hidden_layers=2,
                  out_features=2, sigmac=3, n_freq=70, tdiv=1,
-                 incrementalMask=True):
+                 incrementalMask=True, Tperiod=None):
         super(FfjordModel, self).__init__()
         self.modelshape = {'in_features': in_features,
                            'hidden_features': hidden_features,
@@ -101,7 +101,7 @@ class FfjordModel(torch.nn.Module):
                            }
         self.velfunc = velocMLP(
             in_features, hidden_features, hidden_layers, out_features, sigmac,
-            n_freq, tdiv, incrementalMask)
+            n_freq, tdiv, incrementalMask, Tperiod)
 
     def save_state(self, fn='results/outcache/models/state.tar'):
         selfdict = self.state_dict()

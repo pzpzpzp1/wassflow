@@ -19,7 +19,7 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
                          model=FfjordModel(), outname='results/outcache/',
                          visualize=False, sqrtfitloss=True, detachTZM=True,
                          lr=4e-4, clipnorm=1, inner_percentage=.6,
-                         n_total=3000, stepsperbatch=50, scaling = .5):
+                         n_total=3000, stepsperbatch=50, scaling = .4):
     # dirty hack to maintain compatibility with 2D inputs
     if type(keyMeshes[0]) is torch.Tensor:
         meshSamplePoints = keyMeshes
@@ -48,8 +48,7 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
 
     # more is too slow.
     # 2000 is enough to get a reasonable capture of the image per iter.
-    # max_n_subsample = 1100
-    max_n_subsample = 5000
+    max_n_subsample = 5000 if dim==3 else 1100
     if dim == 3:
         max_n_subsample = 3000
     n_subsample = min(n_subsample, max_n_subsample)
@@ -221,7 +220,7 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
             + .0 * u_selfadvectloss.mean() \
             + .0 * u_div2loss.mean() \
             + 0 * u_aloss.mean() \
-            + .00 * radialKE.mean() \
+            + 1 * radialKE.mean() \
             + .01 * jerkloss.mean()
         # - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
         reglosstime = time.time() - cpt
@@ -251,7 +250,8 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
                 n_subsample = z_target_full.shape[1]
             if n_subsample > max_n_subsample:
                 n_subsample = max_n_subsample
-
+        
+        if batch > 1 and batch % 25 == 0:
             # update LR
             scheduler.step(totalloss.item())  # timestep schedule.
             for g in optimizer.param_groups:
