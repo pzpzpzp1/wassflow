@@ -208,10 +208,10 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
         # combine energies
         # timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
         # timeIndices = (z_sample[:,0] < ((T-1.)/.001)).detach()
-        regloss = .001 * div2loss.mean() \
+        regloss = .000 * div2loss.mean() \
             + 0 * rigid2loss.mean() \
-            + .01 * vgradloss.mean() \
-            + 0 * KEloss.mean() \
+            + .00 * vgradloss.mean() \
+            + .01 * KEloss.mean() \
             + .000 * selfadvectloss.mean() \
             + .00 * Aloss.mean() \
             + .00 * AVloss.mean() \
@@ -220,8 +220,8 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
             + .0 * u_selfadvectloss.mean() \
             + .0 * u_div2loss.mean() \
             + 0 * u_aloss.mean() \
-            + 1 * radialKE.mean() \
-            + .01 * jerkloss.mean()
+            + .1 * radialKE.mean() \
+            + .00 * jerkloss.mean()
         # - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
         reglosstime = time.time() - cpt
 

@@ -359,15 +359,19 @@ class InputMapping(nn.Module):
 
     def __init__(self, d_in, n_freq, sigma=2, tdiv=2, incrementalMask=True, Tperiod=None):
         super().__init__()
-        Bmat = torch.randn(n_freq, d_in) * sigma/np.sqrt(d_in)/2.0  # gaussian
+        Bmat = torch.randn(n_freq, d_in) * np.pi* sigma/np.sqrt(d_in)  # gaussian
         # time frequencies are a quarter of spacial frequencies.
-        Bmat[:, d_in-1] /= tdiv
+        # Bmat[:, d_in-1] /= tdiv
+        Bmat[:, 0] /= tdiv
 
         self.Tperiod = Tperiod
         if Tperiod is not None:
-            Tcycles = (Bmat[:, d_in-1]*Tperiod/(2*np.pi)).round()
+            # Tcycles = (Bmat[:, d_in-1]*Tperiod/(2*np.pi)).round()
+            # K = Tcycles*(2*np.pi)/Tperiod
+            # Bmat[:, d_in-1] = K
+            Tcycles = (Bmat[:, 0]*Tperiod/(2*np.pi)).round()
             K = Tcycles*(2*np.pi)/Tperiod
-            Bmat[:, d_in-1] = K
+            Bmat[:, 0] = K
         
         Bnorms = torch.norm(Bmat, p=2, dim=1)
         sortedBnorms, sortIndices = torch.sort(Bnorms)
@@ -400,8 +404,9 @@ class InputMapping(nn.Module):
                 # self.mask[0, int_filled] = remainder
 
     def forward(self, xi):
+        # pdb.set_trace()
         dim = xi.shape[1]-1
-        y = self.B(2*np.pi*xi)
+        y = self.B(xi)
         if self.Tperiod is None:
             return torch.cat([torch.sin(y)*self.mask, torch.cos(y)*self.mask, xi], dim=-1)
         else:

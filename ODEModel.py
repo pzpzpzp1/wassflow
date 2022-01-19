@@ -31,6 +31,7 @@ class velocMLP(nn.Module):
 
     def get_z_dot(self, t, z):
         """z_dot is parameterized by a NN: z_dot = NN(t, z(t))"""
+        # pdb.set_trace()
         if t.dim() == 0:
             t = t.expand(z.shape[0], 1)
         else:
@@ -98,6 +99,7 @@ class FfjordModel(torch.nn.Module):
                            'hidden_layers': hidden_layers,
                            'out_features': out_features,
                            'n_freq': n_freq,
+                           'Tperiod': Tperiod,
                            }
         self.velfunc = velocMLP(
             in_features, hidden_features, hidden_layers, out_features, sigmac,
@@ -109,12 +111,12 @@ class FfjordModel(torch.nn.Module):
         torch.save(selfdict, fn)
 
     def load_state(self, fn='state.tar'):
+        # pdb.set_trace()
         self_dict = torch.load(fn)
         ms = self_dict.pop('modelshape')
         self.velfunc = velocMLP(
             ms['in_features'], ms['hidden_features'], ms['hidden_layers'],
-            ms['out_features'], 5, ms['n_freq'], 5)
-        
+            ms['out_features'], 5, ms['n_freq'], 5, True, ms['Tperiod'])
         self.load_state_dict(self_dict)
         self = self.to(device)
 
