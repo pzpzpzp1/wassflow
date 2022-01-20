@@ -317,9 +317,8 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
 
     st.save_losses(losses, separate_losses, outfolder=outname, maxcap=10000)
 
-    n_final_default = 5000 if dim==3 else 2000
-    st.save_trajectory(model, z_target_full, savedir=outname, savename='final',
-                       nsteps=20, dpiv=600, n=n_final_default, writeTracers=True,
-                       meshArray=keyMeshes)
-
+    st.save_trajectory(model, z_target_full, savedir=outname,
+                                   savename="final", nsteps=7, n=800,
+                                   dpiv=400, meshArray=keyMeshes)
+    
     return model, losses, separate_losses, lrs, n_subs, separate_times
