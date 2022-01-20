@@ -126,19 +126,21 @@ class ImageDataset():
 
         self.noise_std = noise_std
 
-    def sample(self, n_inner=500, n_sil=500, scale=[1, -1], center=[0, 0]):
+    def sample(self, n_inner=500, n_sil=500, scale=[1, -1], center=[0, 0], rotate=0.):
+        rotate = torch.tensor(rotate)
+        s, c = (torch.sin(rotate), torch.cos(rotate))
+        rot = torch.stack([torch.stack([c, -s]), torch.stack([s, c])])
+        
         inds = np.random.choice(
             int(self.probs.shape[0]), int(n_inner), p=self.probs)
         m = self.means[inds]
-        samps = torch.from_numpy(m).type(
-            torch.FloatTensor) * torch.tensor(scale) + torch.tensor(center)
+        samps = torch.matmul(torch.from_numpy(m).type(torch.FloatTensor), rot) * torch.tensor(scale) + torch.tensor(center)
 
         sinds = np.random.choice(
             int(self.silprobs.shape[0]), int(n_sil), p=self.silprobs)
         ms = self.means[sinds]
         silsamples = np.random.randn(*ms.shape) * self.noise_std + ms
-        silsamps = torch.from_numpy(silsamples).type(
-            torch.FloatTensor) * torch.tensor(scale) + torch.tensor(center)
+        silsamps = torch.matmul(torch.from_numpy(m).type(torch.FloatTensor), rot) * torch.tensor(scale) + torch.tensor(center)
 
         return samps, silsamps
 
@@ -522,6 +524,7 @@ class SaveTrajectory():
                                 edgecolors='black')
 
                     ax.axis('equal')
+                    plt.axis('equal')
                     ax.set(xlim=(emic[0].item(), emac[0].item()),
                            ylim=(emic[1].item(), emac[1].item()))
                     plt.axis('off')
@@ -552,6 +555,7 @@ class SaveTrajectory():
                                 edgecolors='black')
 
                     ax.axis('equal')
+                    plt.axis('equal')
                     ax.set(xlim=(emic[0].item(), emac[0].item()),
                            ylim=(emic[1].item(), emac[1].item()))
                     plt.axis('off')
@@ -640,7 +644,7 @@ class SaveTrajectory():
     
     def render_2d(model, z_target_full, xt_trajs, 
                   savedir='results/outcache/', savename='', dpiv=600, 
-                  sigma=None, knn=20, cycle=False):
+                  sigma=None, knn=20, cycle=False, lw = .5):
         x_trajs, t_trajs, nsteps, T = xt_trajs
         dim = x_trajs.shape[1]
         assert z_target_full.shape[0]==T
@@ -707,7 +711,7 @@ class SaveTrajectory():
                     if t > 0:
                         segment_t = x_trajs_f[:, t -
                                               1:t+1].cpu().numpy()
-                        lc = mc.LineCollection(segment_t, color=ct, lw=0.5,
+                        lc = mc.LineCollection(segment_t, color=ct, lw=lw,
                                                zorder=1)
                         ax.add_collection(lc)
 
