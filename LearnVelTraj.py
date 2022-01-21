@@ -209,10 +209,10 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
         # timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
         # timeIndices = (z_sample[:,0] < ((T-1.)/.001)).detach()
         # pdb.set_trace() 
-        regloss = .000 * div2loss.mean() \
+        regloss = .1 * div2loss.mean() \
             + .0 * rigid2loss.mean() \
             + .00 * vgradloss.mean() \
-            + .01 * KEloss.mean() \
+            + .00 * KEloss.mean() \
             + .000 * selfadvectloss.mean() \
             + .0 * Aloss.mean() \
             + .00 * AVloss.mean() \
@@ -224,7 +224,7 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
             + .0 * u_div2loss.mean() \
             + 0 * u_aloss.mean() \
             + .00 * radialKE.mean() \
-            + .00 * jerkloss.mean()
+            + .01 * jerkloss.mean()
         if dim==2:
             # curl averaged over trajectory is -pi. meaning, in 3s, it makes a 270 degree rotation - clockwise.
             regloss += .0*(curlvector.mean() + np.pi)**2

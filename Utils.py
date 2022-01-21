@@ -651,13 +651,65 @@ class SaveTrajectory():
             
         return x_trajs, t_trajs, nsteps, T
     
+    # get the piecewise W2 interpolation between keyframes. Like waddintonOT, or if the model only performed identity maps.
+    def get_OT_trajectory(z_target_full, nsteps=20, n=4000, ot_type=2):
+        z_target_full = z_target_full.detach()
+
+        with torch.no_grad():
+            # save trajectory video0
+            if n > z_target_full.shape[1]:
+                n = z_target_full.shape[1]
+            subsample_inds = torch.randperm(z_target_full.shape[1])[:n]
+            z_target = z_target_full[:, subsample_inds, :]
+
+            T = z_target.shape[0]            
+            # forward and back
+            ts = torch.linspace(0, 1, nsteps)
+            x_trajs = torch.zeros(n, 2, (T-1)*(nsteps-1)+1)
+            t_trajs = torch.zeros((T-1)*(nsteps-1)+1)
+            trajsc = 0
+            indices = torch.arange(0, z_target.shape[1])
+            for tt in range(T-1):
+                if tt > 0:
+                    # this permutation is needed to keep x_trajs continuous. otherwise at keyframes, the permutation gets reset.
+                    _fst, indices = MiscTransforms.OT_registration_POT_2D(
+                        x_traj_t, z_target[tt, :, :])
+                
+                integration_times = torch.linspace(
+                    tt, tt+1, nsteps).to(device)
+                
+                fs = z_target[tt, :, :]
+                ft = z_target[tt+1, :, :]
+                
+                # W2 barycenter combination
+                if ot_type == 1:
+                    # this registration isn't 1-1 on point clouds. don't know why currently.
+                    fst = MiscTransforms.OT_registration(fs, ft)
+                elif ot_type == 2:
+                    # full linear program version of OT. slightly slower than geomloss but frankly not that slow compared to other steps in the pipeline.
+                    fst, indices = MiscTransforms.OT_registration_POT_2D(
+                        fs, ft)
+
+                endstep = nsteps if tt == T-2 else nsteps-1
+                for i in range(endstep):
+                    x_traj_t = (fs*(1-ts[i]) + fst*ts[i])
+                    x_trajs[:, :, trajsc] = x_traj_t
+                    t_trajs[trajsc] = integration_times[i]
+                    trajsc += 1
+
+        return x_trajs, t_trajs, nsteps, T
+    
     def render_2d(model, z_target_full, xt_trajs, 
                   savedir='results/outcache/', savename='', dpiv=600, 
-                  sigma=None, knn=20, cycle=False, lw = .5, contrast = 3):
+                  sigma=None, knn=20, cycle=False, lw = .5, contrast = 3, keyframes = True, Nqvr = 150, Nrbf=10000, showVelocity = True):
         x_trajs, t_trajs, nsteps, T = xt_trajs
         dim = x_trajs.shape[1]
         assert z_target_full.shape[0]==T
         assert x_trajs.shape[2] == (T-1)*(nsteps-1)+1
+        
+        imsavefolder = savedir + 'traj_pics/'
+        if not os.path.exists(imsavefolder):
+            os.makedirs(imsavefolder)
         
         with torch.no_grad():
             # render
@@ -675,12 +727,11 @@ class SaveTrajectory():
             # set up bounding box and uniform quiver locations
             full_traj = BoundingBox(x_trajs[:, :, :].permute((2,0,1)), square=False)
             emic, emac = full_traj.extendedBB(1.1)
-            Ntot = 150
             width=emac[0].item()-emic[0].item()
             height=emac[1].item()-emic[1].item()
             widthSamples = width/height
-            nH = int(np.floor(np.sqrt(Ntot*height/width)))
-            nW = int(np.floor(Ntot/nH))
+            nH = int(np.floor(np.sqrt(Nqvr*height/width)))
+            nW = int(np.floor(Nqvr/nH))
             z_sample = full_traj.sampleuniform(t_N=1, x_N=nW, y_N=nH)
             z_sample_d = z_sample.cpu().numpy()
 
@@ -701,13 +752,14 @@ class SaveTrajectory():
                     dct = (dctt[0].item(), dctt[1].item(), dctt[2].item())
 
                     # plot velocities
-                    z_dots_d = model.velfunc.get_z_dot(
-                        z_sample[:, 0]*0.0 + t_trajs[t],
-                        z_sample[:, 1:]).cpu().numpy()
-                    qvr = ax.quiver(z_sample_d[:, 1], z_sample_d[:, 2],
-                                    z_dots_d[:, 0], z_dots_d[:, 1],
-                                    headwidth=1, headlength=3,
-                                    headaxislength=2,zorder=5)
+                    if showVelocity:
+                        z_dots_d = model.velfunc.get_z_dot(
+                            z_sample[:, 0]*0.0 + t_trajs[t],
+                            z_sample[:, 1:]).cpu().numpy()
+                        qvr = ax.quiver(z_sample_d[:, 1], z_sample_d[:, 2],
+                                        z_dots_d[:, 0], z_dots_d[:, 1],
+                                        headwidth=1, headlength=3,
+                                        headaxislength=2,zorder=5)
 
                     # plot keyframes as tracers pass by
                     dontremovescr = False
@@ -739,12 +791,11 @@ class SaveTrajectory():
                             knn+1, largest=False).values[:, -1]
 
                     # sample Ntot points in a rectangular grid, while being fair to aspect ratio
-                    Ntot = 10000
                     width=emacf[0].item()-emicf[0].item()
                     height=emacf[1].item()-emicf[1].item()
                     widthSamples = width/height
-                    nH = int(np.floor(np.sqrt(Ntot*height/width)))
-                    nW = int(np.floor(Ntot/nH))
+                    nH = int(np.floor(np.sqrt(Nrbf*height/width)))
+                    nW = int(np.floor(Nrbf/nH))
 
                     xs = torch.linspace(
                         emicf[0].item(), emacf[0].item(),
@@ -781,23 +832,31 @@ class SaveTrajectory():
                     color2 = np.array(dct + (0,))
                     color3 = np.array(ct + (0,))
 
-                    # im = zs * color + (1-zs) * np.array([1, 1, 1, 0]) # back color is white
-                    im = zs * color + (1-zs) * color2 # back color is same as front
-                    im = zs * color + (1-zs) * color3 # back color matches tracers
+                    im_whiteback = zs * color + (1-zs) * np.array([1, 1, 1, 0]) # back color is white
+                    if lw==0:
+                        im = im_whiteback
+                    else:
+                        # im = zs * color + (1-zs) * color2 # back color is same as front
+                        im = zs * color + (1-zs) * color3 # back color matches tracers
+                    
                     im = (im * 255).astype(np.uint8)
-
                     scr = ax.imshow(
                         im, extent=(emicf[0].item(), emacf[0].item(),
                                     emicf[1].item(), emacf[1].item()),
                         origin='lower', zorder=4)
-
+                    
+                    # save image alone for later use
+                    imsavename = imsavefolder + f'pic_'+savename+ f'_{t:04}.jpg';
+                    im2save = (im_whiteback * 255).astype(np.uint8)
+                    cv.imwrite(imsavename, np.flipud(im2save[:,:,[2, 1, 0, 3]]))
+                    # pdb.set_trace()
                     
                     ax.set(xlim=(emic[0].item(), emac[0].item()),
                            ylim=(emic[1].item(), emac[1].item()))
                     moviewriter.grab_frame()
-                    if not dontremovescr:
+                    if not dontremovescr or not keyframes:
                         scr.remove()
-                    qvr.remove()
+                    qvr.remove() if showVelocity else None
             moviewriter.finish()
             plt.close(fig)
 
