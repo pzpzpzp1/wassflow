@@ -141,7 +141,7 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
         n_points = z_dots.shape[0]
 
         # div, curl, rigid, grad
-        div2loss, curl2loss, rigid2loss, vgradloss = sl.jac_to_losses(z_jacs)
+        div2loss, curl2loss, rigid2loss, vgradloss, curlvector = sl.jac_to_losses(z_jacs)
         # kinetic energy loss
         z_dot_norms = torch.norm(z_dots, p=2, dim=1, keepdim=True)
         KEloss = z_dot_norms[:, 0]**2
@@ -177,7 +177,7 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
         n_points_u = z_dots_u.shape[0]
 
         # global div, curl, rigid, grad
-        u_div2loss, u_curl2loss, u_rigid2loss, u_vgradloss = sl.jac_to_losses(
+        u_div2loss, u_curl2loss, u_rigid2loss, u_vgradloss, u_curlvector = sl.jac_to_losses(
             z_jacs_u)
         # global self advection loss
         selfadvect_u = torch.bmm(
@@ -208,7 +208,7 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
         # combine energies
         # timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
         # timeIndices = (z_sample[:,0] < ((T-1.)/.001)).detach()
-        # pdb.set_trace()
+        # pdb.set_trace() 
         regloss = .000 * div2loss.mean() \
             + .0 * rigid2loss.mean() \
             + .00 * vgradloss.mean() \
@@ -223,8 +223,14 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
             + .0 * u_selfadvectloss.mean() \
             + .0 * u_div2loss.mean() \
             + 0 * u_aloss.mean() \
-            + .0 * radialKE.mean() \
+            + .00 * radialKE.mean() \
             + .01 * jerkloss.mean()
+        if dim==2:
+            # curl averaged over trajectory is -pi. meaning, in 3s, it makes a 270 degree rotation - clockwise.
+            # regloss += .1*(curlvector.mean() + np.pi)**2
+            # curl at every part of the trajectory is -pi
+            regloss += .1*((curlvector + np.pi)**2).mean()
+        
         # - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
         reglosstime = time.time() - cpt
 

@@ -74,10 +74,19 @@ class SpecialLosses():
         for i in range(dim):
             div2loss += z_jacs[:, i, i]
         div2loss = div2loss**2
+        # curl
+        if dim==2:
+            curlvector = z_jacs[:,1,0] - z_jacs[:,0,1]
+        else:
+            c1 = z_jacs[:,2,1] - z_jacs[:,2,1]
+            c2 = z_jacs[:,0,2] - z_jacs[:,2,0]
+            c3 = z_jacs[:,1,0] - z_jacs[:,0,1]
+            curlvector = torch.stack((c1,c2,c3),axis=1)
         # square norm of curl
         curl2loss = torch.norm(
             z_jacs - z_jacs.transpose(1, 2), p='fro', dim=(1, 2))**2/2
-
+        # pdb.set_trace()
+        
         # rigid motion: x(t) -> e^[wt] x0 + kt.
         # v = x_dot = [w]x0+k; dvdx = [w].
         # ==> skew symmetric velocity gradient is rigid.
@@ -89,7 +98,7 @@ class SpecialLosses():
         # v-field gradient loss
         vgradloss = torch.norm(z_jacs, p='fro', dim=(1, 2))**2
 
-        return div2loss, curl2loss, rigid2loss, vgradloss
+        return div2loss, curl2loss, rigid2loss, vgradloss, curlvector
 
 
 class ImageDataset():
