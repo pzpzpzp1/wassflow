@@ -149,7 +149,7 @@ class ImageDataset():
             int(self.silprobs.shape[0]), int(n_sil), p=self.silprobs)
         ms = self.means[sinds]
         silsamples = np.random.randn(*ms.shape) * self.noise_std + ms
-        silsamps = torch.matmul(torch.from_numpy(m).type(torch.FloatTensor), rot) * torch.tensor(scale) + torch.tensor(center)
+        silsamps = torch.matmul(torch.from_numpy(ms).type(torch.FloatTensor), rot) * torch.tensor(scale) + torch.tensor(center)
 
         return samps, silsamps
 
@@ -653,7 +653,7 @@ class SaveTrajectory():
     
     def render_2d(model, z_target_full, xt_trajs, 
                   savedir='results/outcache/', savename='', dpiv=600, 
-                  sigma=None, knn=20, cycle=False, lw = .5):
+                  sigma=None, knn=20, cycle=False, lw = .5, contrast = 3):
         x_trajs, t_trajs, nsteps, T = xt_trajs
         dim = x_trajs.shape[1]
         assert z_target_full.shape[0]==T
@@ -764,13 +764,16 @@ class SaveTrajectory():
                     zs -= zs.min()
                     zs /= zs.max()
 
-                    # lower contrast. slightly mottled inside.
-                    # zs = .95*(torch.tanh(4*(zs-.6))+1)/2 - .04
-                    # zs[zs<0]=0
-                    # pretty sharp boundaries. more constant inside.
-                    # zs = (torch.tanh(7*(zs-.5))+1)/2
-                    # experimental. need even sharper boundaries?
-                    zs = (torch.tanh(7.5*(zs-.45))+1)/2
+                    if contrast==1:
+                        # lower contrast. slightly mottled inside.
+                        zs = .95*(torch.tanh(4*(zs-.6))+1)/2 - .04
+                        zs[zs<0]=0
+                    elif contrast==2:
+                        # pretty sharp boundaries. more constant inside.
+                        zs = (torch.tanh(7*(zs-.5))+1)/2
+                    else:
+                        # experimental. need even sharper boundaries?
+                        zs = (torch.tanh(7.5*(zs-.45))+1)/2
                     
                     zs/=zs.max()
                     zs = zs.cpu().numpy()[:, :, None]

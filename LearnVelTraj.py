@@ -212,9 +212,9 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
         regloss = .000 * div2loss.mean() \
             + .0 * rigid2loss.mean() \
             + .00 * vgradloss.mean() \
-            + .00 * KEloss.mean() \
+            + .01 * KEloss.mean() \
             + .000 * selfadvectloss.mean() \
-            + .00 * Aloss.mean() \
+            + .0 * Aloss.mean() \
             + .00 * AVloss.mean() \
             + .00 * Kloss.mean() \
             - 0 * torch.clamp(curl2loss.mean(), 0, .02) \
@@ -224,12 +224,12 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
             + .0 * u_div2loss.mean() \
             + 0 * u_aloss.mean() \
             + .00 * radialKE.mean() \
-            + .01 * jerkloss.mean()
+            + .00 * jerkloss.mean()
         if dim==2:
             # curl averaged over trajectory is -pi. meaning, in 3s, it makes a 270 degree rotation - clockwise.
-            # regloss += .1*(curlvector.mean() + np.pi)**2
+            regloss += .0*(curlvector.mean() + np.pi)**2
             # curl at every part of the trajectory is -pi
-            regloss += .1*((curlvector + np.pi)**2).mean()
+            regloss += .0*((curlvector + np.pi)**2).mean()
         
         # - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
         reglosstime = time.time() - cpt
