@@ -214,10 +214,10 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
         # timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
         # timeIndices = (z_sample[:,0] < ((T-1.)/.001)).detach()
         # pdb.set_trace() 
-        regloss = .0 * div2loss.mean() \
-            + 1 * rigid2loss.mean() \
+        regloss = 1 * div2loss.mean() \
+            + 0 * rigid2loss.mean() \
             + .00 * vgradloss.mean() \
-            + .01 * KEloss.mean() \
+            + .1 * KEloss.mean() \
             + .000 * selfadvectloss.mean() \
             + .00 * Aloss.mean() \
             + .00 * AVloss.mean() \

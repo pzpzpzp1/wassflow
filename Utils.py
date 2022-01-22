@@ -743,16 +743,14 @@ class SaveTrajectory():
             z_sample = full_traj.sampleuniform(t_N=1, x_N=nW, y_N=nH)
             z_sample_d = z_sample.cpu().numpy()
 
-            # get largest single BB that tightly covers all frame rbfs individually
+            # get largest single BB width and height that covers all frame rbfs individually
             frameBB = BoundingBox(x_trajs[:, :, 0:1].permute((2,0,1)), square=False)
-            emicM, emacM = frameBB.extendedBB(1.2)
+            emicM, emacM = frameBB.extendedBB(1.2); wM = emacM[0]-emicM[0]; hM = emacM[1]-emicM[1]
             for t in range(0,nf):
                 frameBB = BoundingBox(x_trajs[:, :, t:t+1].permute((2,0,1)), square=False)
-                emicT, emacT = frameBB.extendedBB(1.2)
-                if (emacT - emicT).norm() > (emicM - emacM).norm():
-                    emicM = emicT
-                    emacM = emacT
-            cmM = (emicM+emacM)/2; # center mass.
+                emicT, emacT = frameBB.extendedBB(1.2); wT = emacT[0]-emicT[0]; hT = emacT[1]-emicT[1]
+                wM = wM if wM > wT else wT
+                hM = hM if hM > hT else hT
             
             ax.axis('off')
             plt.scatter([emic[0].item(), emac[0].item()], [emic[1].item(), emac[1].item()], alpha=0, linewidths=0)
@@ -806,8 +804,10 @@ class SaveTrajectory():
                     if not tightBB:
                         # use single precomputed bounding box for all frames.
                         cmf = (emicf + emacf)/2
-                        emicf = emicM + cmf - cmM
-                        emacf = emacM + cmf - cmM
+                        emicf[0] = cmf[0]-wM/2
+                        emicf[1] = cmf[1]-hM/2
+                        emacf[0] = cmf[0]+wM/2
+                        emacf[1] = cmf[1]+hM/2
 
                     if Nrbf != 0:
                         if sigma is not None:
