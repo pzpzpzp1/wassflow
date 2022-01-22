@@ -104,19 +104,21 @@ class SpecialLosses():
 class ImageDataset():
     """Sample from a distribution defined by an image."""
 
-    def __init__(self, imgname, thresh=51, cannylow=50, cannyhigh=200,
-                 rgb_weights=[0.2989, 0.5870, 0.1140, 0], noise_std=.005):
+    def __init__(self, imgname, thresh=.2, cannylow=50, cannyhigh=200,
+                 rgb_weights=[0.2989, 0.5870, 0.1140, 0], noise_std=.005, binary = True):
         imgrgb = cv.imread(imgname, cv.IMREAD_UNCHANGED)
         img = cv.cvtColor(imgrgb, cv.COLOR_BGR2GRAY)
         edges = cv.Canny(imgrgb, cannylow, cannyhigh)
         self.img = img.copy()
         self.edges = edges.copy()
-
         imgd = img.astype('float')
         edgesd = edges.astype('float')
-
-        imgd[imgd < thresh] = 0
-        imgd[imgd >= thresh] = 1
+        imgd/=imgd.max()
+        imgd[imgd >= thresh] = 1 # chop off near whites become white.
+        if binary:
+            imgd[imgd < thresh] = 0
+        
+            
         imgd = 1-imgd
         h1, w1 = imgd.shape
 
@@ -140,17 +142,23 @@ class ImageDataset():
         s, c = (torch.sin(rotate), torch.cos(rotate))
         rot = torch.stack([torch.stack([c, -s]), torch.stack([s, c])])
         
-        inds = np.random.choice(
-            int(self.probs.shape[0]), int(n_inner), p=self.probs)
-        m = self.means[inds]
-        samps = torch.matmul(torch.from_numpy(m).type(torch.FloatTensor), rot) * torch.tensor(scale) + torch.tensor(center)
+        samps = torch.zeros((0,2))
+        silsamps = torch.zeros((0,2))
+        
+        if n_inner!=0:
+            inds = np.random.choice(
+                int(self.probs.shape[0]), int(n_inner), p=self.probs)
+            m = self.means[inds]
+            samps = torch.matmul(torch.from_numpy(m).type(torch.FloatTensor), rot) * torch.tensor(scale) + torch.tensor(center)
 
-        sinds = np.random.choice(
-            int(self.silprobs.shape[0]), int(n_sil), p=self.silprobs)
-        ms = self.means[sinds]
-        silsamples = np.random.randn(*ms.shape) * self.noise_std + ms
-        silsamps = torch.matmul(torch.from_numpy(ms).type(torch.FloatTensor), rot) * torch.tensor(scale) + torch.tensor(center)
+        if n_sil!=0:
+            sinds = np.random.choice(
+                int(self.silprobs.shape[0]), int(n_sil), p=self.silprobs)
+            ms = self.means[sinds]
+            silsamples = np.random.randn(*ms.shape) * self.noise_std + ms
+            silsamps = torch.matmul(torch.from_numpy(silsamples).type(torch.FloatTensor), rot) * torch.tensor(scale) + torch.tensor(center)
 
+        # pdb.set_trace()
         return samps, silsamps
 
     def make_image(n=10000):
@@ -701,7 +709,7 @@ class SaveTrajectory():
     
     def render_2d(model, z_target_full, xt_trajs, 
                   savedir='results/outcache/', savename='', dpiv=600, 
-                  sigma=None, knn=20, cycle=False, lw = .5, contrast = 3, keyframes = True, Nqvr = 150, Nrbf=10000, showVelocity = True):
+                  sigma=None, knn=20, cycle=False, lw = .5, contrast = 3, keyframes = True, Nqvr = 150, Nrbf=10000, showVelocity = True, plotKeypoints=False,tightBB=True):
         x_trajs, t_trajs, nsteps, T = xt_trajs
         dim = x_trajs.shape[1]
         assert z_target_full.shape[0]==T
@@ -735,6 +743,17 @@ class SaveTrajectory():
             z_sample = full_traj.sampleuniform(t_N=1, x_N=nW, y_N=nH)
             z_sample_d = z_sample.cpu().numpy()
 
+            # get largest single BB that tightly covers all frame rbfs individually
+            frameBB = BoundingBox(x_trajs[:, :, 0:1].permute((2,0,1)), square=False)
+            emicM, emacM = frameBB.extendedBB(1.2)
+            for t in range(0,nf):
+                frameBB = BoundingBox(x_trajs[:, :, t:t+1].permute((2,0,1)), square=False)
+                emicT, emacT = frameBB.extendedBB(1.2)
+                if (emacT - emicT).norm() > (emicM - emacM).norm():
+                    emicM = emicT
+                    emacM = emacT
+            cmM = (emicM+emacM)/2; # center mass.
+            
             ax.axis('off')
             plt.scatter([emic[0].item(), emac[0].item()], [emic[1].item(), emac[1].item()], alpha=0, linewidths=0)
             dullingfactor = .6
@@ -778,85 +797,97 @@ class SaveTrajectory():
 
                     # plot endpoints
                     points = x_trajs[:, :, t].to(device)
+                    if plotKeypoints:
+                        pointsp = points.detach().cpu().numpy()
+                        kyp = ax.scatter(pointsp[:,0],pointsp[:,1],s=10, alpha=1,linewidths=0, color=dct, edgecolors='black')
+                    
                     frameBB = BoundingBox(x_trajs[:, :, t:t+1].permute((2,0,1)), square=False)
                     emicf, emacf = frameBB.extendedBB(1.2)
+                    if not tightBB:
+                        # use single precomputed bounding box for all frames.
+                        cmf = (emicf + emacf)/2
+                        emicf = emicM + cmf - cmM
+                        emacf = emacM + cmf - cmM
 
-                    if sigma is not None:
-                        sigmas = torch.tensor(sigma).to(device)
-                    else:
-                        pdists = torch.tensor(
-                            squareform(torch.pdist(points.cpu()))
-                        ).to(device)
-                        sigmas = pdists.topk(
-                            knn+1, largest=False).values[:, -1]
+                    if Nrbf != 0:
+                        if sigma is not None:
+                            sigmas = torch.tensor(sigma).to(device)
+                        else:
+                            pdists = torch.tensor(
+                                squareform(torch.pdist(points.cpu()))
+                            ).to(device)
+                            sigmas = pdists.topk(
+                                knn+1, largest=False).values[:, -1]
 
-                    # sample Ntot points in a rectangular grid, while being fair to aspect ratio
-                    width=emacf[0].item()-emicf[0].item()
-                    height=emacf[1].item()-emicf[1].item()
-                    widthSamples = width/height
-                    nH = int(np.floor(np.sqrt(Nrbf*height/width)))
-                    nW = int(np.floor(Nrbf/nH))
+                        # sample Ntot points in a rectangular grid, while being fair to aspect ratio
+                        width=emacf[0].item()-emicf[0].item()
+                        height=emacf[1].item()-emicf[1].item()
+                        widthSamples = width/height
+                        nH = int(np.floor(np.sqrt(Nrbf*height/width)))
+                        nW = int(np.floor(Nrbf/nH))
 
-                    xs = torch.linspace(
-                        emicf[0].item(), emacf[0].item(),
-                        nW).to(device)
-                    ys = torch.linspace(
-                        emicf[1].item(), emacf[1].item(),
-                        nH).to(device)
-                    grid = torch.stack(torch.meshgrid(xs, ys,
-                                                      indexing='xy'),
-                                       dim=-1)
+                        xs = torch.linspace(
+                            emicf[0].item(), emacf[0].item(),
+                            nW).to(device)
+                        ys = torch.linspace(
+                            emicf[1].item(), emacf[1].item(),
+                            nH).to(device)
+                        grid = torch.stack(torch.meshgrid(xs, ys,
+                                                          indexing='xy'),
+                                           dim=-1)
 
-                    dists = (grid[:, :, None] -
-                             points[None, None]).norm(p=2, dim=-1)
-                    zs = torch.exp(
-                        -(dists.pow(2) /
-                          (2 * sigmas[None, None]**2))).sum(-1)
-                    zs -= zs.min()
-                    zs /= zs.max()
+                        dists = (grid[:, :, None] -
+                                 points[None, None]).norm(p=2, dim=-1)
+                        zs = torch.exp(
+                            -(dists.pow(2) /
+                              (2 * sigmas[None, None]**2))).sum(-1)
+                        zs -= zs.min()
+                        zs /= zs.max()
 
-                    if contrast==1:
-                        # lower contrast. slightly mottled inside.
-                        zs = .95*(torch.tanh(4*(zs-.6))+1)/2 - .04
-                        zs[zs<0]=0
-                    elif contrast==2:
-                        # pretty sharp boundaries. more constant inside.
-                        zs = (torch.tanh(7*(zs-.5))+1)/2
-                    else:
-                        # experimental. need even sharper boundaries?
-                        zs = (torch.tanh(7.5*(zs-.45))+1)/2
+                        if contrast==1:
+                            # lower contrast. slightly mottled inside.
+                            zs = .95*(torch.tanh(4*(zs-.6))+1)/2 - .04
+                            zs[zs<0]=0
+                        elif contrast==2:
+                            # pretty sharp boundaries. more constant inside.
+                            zs = (torch.tanh(7*(zs-.5))+1)/2
+                        else:
+                            # experimental. need even sharper boundaries?
+                            zs = (torch.tanh(7.5*(zs-.45))+1)/2
+
+                        zs/=zs.max()
+                        zs = zs.cpu().numpy()[:, :, None]
+                        color = np.array(dct + (1,))
+                        color2 = np.array(dct + (0,))
+                        color3 = np.array(ct + (0,))
+
+                        im_whiteback = zs * color + (1-zs) * np.array([1, 1, 1, 0]) # back color is white
+                        if lw==0:
+                            im = im_whiteback
+                        else:
+                            # im = zs * color + (1-zs) * color2 # back color is same as front
+                            im = zs * color + (1-zs) * color3 # back color matches tracers
+
+                        im = (im * 255).astype(np.uint8)
+                        scr = ax.imshow(
+                            im, extent=(emicf[0].item(), emacf[0].item(),
+                                        emicf[1].item(), emacf[1].item()),
+                            origin='lower', zorder=4)
                     
-                    zs/=zs.max()
-                    zs = zs.cpu().numpy()[:, :, None]
-                    color = np.array(dct + (1,))
-                    color2 = np.array(dct + (0,))
-                    color3 = np.array(ct + (0,))
-
-                    im_whiteback = zs * color + (1-zs) * np.array([1, 1, 1, 0]) # back color is white
-                    if lw==0:
-                        im = im_whiteback
-                    else:
-                        # im = zs * color + (1-zs) * color2 # back color is same as front
-                        im = zs * color + (1-zs) * color3 # back color matches tracers
-                    
-                    im = (im * 255).astype(np.uint8)
-                    scr = ax.imshow(
-                        im, extent=(emicf[0].item(), emacf[0].item(),
-                                    emicf[1].item(), emacf[1].item()),
-                        origin='lower', zorder=4)
-                    
-                    # save image alone for later use
-                    imsavename = imsavefolder + f'pic_'+savename+ f'_{t:04}.jpg';
-                    im2save = (im_whiteback * 255).astype(np.uint8)
-                    cv.imwrite(imsavename, np.flipud(im2save[:,:,[2, 1, 0, 3]]))
-                    # pdb.set_trace()
+                        # save image alone for later use
+                        imsavename = imsavefolder + f'pic_'+savename+ f'_{t:04}.jpg';
+                        im2save = (im_whiteback * 255).astype(np.uint8)
+                        cv.imwrite(imsavename, np.flipud(im2save[:,:,[2, 1, 0, 3]]))
                     
                     ax.set(xlim=(emic[0].item(), emac[0].item()),
                            ylim=(emic[1].item(), emac[1].item()))
                     moviewriter.grab_frame()
                     if not dontremovescr or not keyframes:
-                        scr.remove()
+                        if  Nrbf != 0:
+                            scr.remove()
                     qvr.remove() if showVelocity else None
+                    if plotKeypoints:
+                        kyp.remove()
             moviewriter.finish()
             plt.close(fig)
 
@@ -1026,6 +1057,9 @@ class SaveTrajectory():
             aspectmode='data', aspectratio=dict(x=1, y=1, z=1)))
         plotly.offline.plot(fig, filename=savedir+'fb_'+savename+'.html')
 
+        # save points as nframes, npoints, dim
+        np.save(savedir+'x_trajs_'+savename+'.npy', x_trajs.permute((2,0,1)).detach().numpy())
+        
         return x_trajs
 
 

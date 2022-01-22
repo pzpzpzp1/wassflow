@@ -19,7 +19,7 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
                          model=FfjordModel(), outname='results/outcache/',
                          visualize=False, sqrtfitloss=True, detachTZM=True,
                          lr=4e-4, clipnorm=1, inner_percentage=.6,
-                         n_total=3000, stepsperbatch=50, scaling = .4):
+                         n_total=3000, stepsperbatch=50, scaling = .4,normalize=True):
     # dirty hack to maintain compatibility with 2D inputs
     if type(keyMeshes[0]) is torch.Tensor:
         meshSamplePoints = keyMeshes
@@ -27,14 +27,17 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
         meshSamplePoints = MeshDataset.meshArrayToPoints(
             keyMeshes, inner_percentage, n_total)
 
-    # normalize point cloud and apply to meshes if needed
-    z_target_full, transform = ImageDataset.normalize_samples(
-        torch.tensor(meshSamplePoints).to(device).float())
-    if type(keyMeshes[0]) is not torch.Tensor:
-        for i in range(len(keyMeshes)):
-            keyMeshes[i].mesh.vertices = transform(torch.tensor(
-                keyMeshes[i].mesh.vertices).to(device)).cpu().numpy()
-
+    if normalize:
+        # normalize point cloud and apply to meshes if needed
+        z_target_full, transform = ImageDataset.normalize_samples(
+            torch.tensor(meshSamplePoints).to(device).float())
+        if type(keyMeshes[0]) is not torch.Tensor:
+            for i in range(len(keyMeshes)):
+                keyMeshes[i].mesh.vertices = transform(torch.tensor(
+                    keyMeshes[i].mesh.vertices).to(device)).cpu().numpy()
+    else:
+        z_target_full = meshSamplePoints
+                
     # normalize to fit in [0,1] box.
     my_loss_f = SamplesLoss("sinkhorn", p=2, blur=0.0001, scaling = scaling)
     if not os.path.exists(outname):
@@ -45,7 +48,9 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
     T = fullshape[0]
     n_total = fullshape[1]
     dim = fullshape[2]
-
+    nsteps = 20 if dim==3 else 7
+    n_save_points = 800 if dim==2 else 5000
+    
     # more is too slow.
     # 2000 is enough to get a reasonable capture of the image per iter.
     max_n_subsample = 5000 if dim==3 else 1100
@@ -209,12 +214,12 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
         # timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
         # timeIndices = (z_sample[:,0] < ((T-1.)/.001)).detach()
         # pdb.set_trace() 
-        regloss = .1 * div2loss.mean() \
-            + .0 * rigid2loss.mean() \
+        regloss = .0 * div2loss.mean() \
+            + 1 * rigid2loss.mean() \
             + .00 * vgradloss.mean() \
-            + .00 * KEloss.mean() \
+            + .01 * KEloss.mean() \
             + .000 * selfadvectloss.mean() \
-            + .0 * Aloss.mean() \
+            + .00 * Aloss.mean() \
             + .00 * AVloss.mean() \
             + .00 * Kloss.mean() \
             - 0 * torch.clamp(curl2loss.mean(), 0, .02) \
@@ -224,7 +229,8 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
             + .0 * u_div2loss.mean() \
             + 0 * u_aloss.mean() \
             + .00 * radialKE.mean() \
-            + .01 * jerkloss.mean()
+            + .00 * jerkloss.mean() \
+            + 0 * u_rigid2loss.mean()
         if dim==2:
             # curl averaged over trajectory is -pi. meaning, in 3s, it makes a 270 degree rotation - clockwise.
             regloss += .0*(curlvector.mean() + np.pi)**2
@@ -275,7 +281,7 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
             cpt = time.time()
             if batch > 0:
                 st.save_trajectory(model, z_target_full, savedir=outname,
-                                   savename=f"{batch:04}", nsteps=7, n=800,
+                                   savename=f"{batch:04}", nsteps=nsteps, n=n_save_points,
                                    dpiv=400, meshArray=keyMeshes)
             savetime = time.time() - cpt
 
@@ -327,7 +333,7 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
     st.save_losses(losses, separate_losses, outfolder=outname, maxcap=10000)
 
     st.save_trajectory(model, z_target_full, savedir=outname,
-                                   savename="final", nsteps=7, n=800,
+                                   savename="final", nsteps=nsteps, n=n_save_points,
                                    dpiv=400, meshArray=keyMeshes)
     
     return model, losses, separate_losses, lrs, n_subs, separate_times
