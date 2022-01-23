@@ -174,6 +174,7 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
         Kloss = (kurvature - 1)**2
         # radial kinetic energy
         radialKE = sl.radialKE(tzm, z_dots)
+        polarKE = sl.polarKE(tzm, z_dots)
 
         # UNIFORM SPACETIME VELOCITY REGULARIZERS
         tzu = BB.samplerandom(N=1500, bbscale=1.1)
@@ -209,17 +210,18 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
         separate_losses[13, batch] = u_aloss.mean().item()
         separate_losses[14, batch] = radialKE.mean().item()
         separate_losses[15, batch] = jerkloss.mean().item()
+        separate_losses[16, batch] = polarKE.mean().item()
 
         # combine energies
         # timeIndices = (z_sample[:,0] < ((T-1.)/5.0)).detach()
         # timeIndices = (z_sample[:,0] < ((T-1.)/.001)).detach()
         # pdb.set_trace() 
-        regloss = 1 * div2loss.mean() \
+        regloss = 0 * div2loss.mean() \
             + 0 * rigid2loss.mean() \
             + .00 * vgradloss.mean() \
-            + .1 * KEloss.mean() \
+            + .0 * KEloss.mean() \
             + .000 * selfadvectloss.mean() \
-            + .00 * Aloss.mean() \
+            + 5 * Aloss.mean() \
             + .00 * AVloss.mean() \
             + .00 * Kloss.mean() \
             - 0 * torch.clamp(curl2loss.mean(), 0, .02) \
@@ -229,7 +231,8 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
             + .0 * u_div2loss.mean() \
             + 0 * u_aloss.mean() \
             + .00 * radialKE.mean() \
-            + .00 * jerkloss.mean() \
+            + .00 * polarKE.mean() \
+            + .01 * jerkloss.mean() \
             + 0 * u_rigid2loss.mean()
         if dim==2:
             # curl averaged over trajectory is -pi. meaning, in 3s, it makes a 270 degree rotation - clockwise.

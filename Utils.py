@@ -64,6 +64,20 @@ class SpecialLosses():
         dir = tz[:, 1:]
         normalizedRadial = dir/dir.norm(p=2, dim=1, keepdim=True)
         return (z_dots*normalizedRadial).sum(dim=1)**2
+    
+    def polarKE(tz, z_dots):
+        dir = tz[:, 1:]
+        normalizedRadial = dir/dir.norm(p=2, dim=1, keepdim=True)
+        
+        # build A = I - v*v', where v is normalized outwards dir from origin
+        A = -torch.bmm(normalizedRadial[:,:,None], normalizedRadial[:,:,None].permute((0, 2, 1)))
+        A[:,0,0]+=1
+        A[:,1,1]+=1
+        
+        Azd = torch.bmm(A, z_dots[:,:,None])
+        zdAzd = torch.bmm(z_dots[:,None,:],Azd)
+        
+        return zdAzd.squeeze()
 
     def jac_to_losses(z_jacs):
         dim = z_jacs.shape[1]
