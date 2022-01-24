@@ -18,6 +18,7 @@ from plotly.graph_objs import Figure, Layout, Scatter3d
 from scipy.spatial.distance import squareform
 from torch import nn
 import pdb
+import scipy.interpolate as scipyinterpolate
 
 
 use_cuda = torch.cuda.is_available()
@@ -672,6 +673,36 @@ class SaveTrajectory():
             plt.close(fig)
             
         return x_trajs, t_trajs, nsteps, T
+    
+    def get_cubic_OT_trajectory(z_target_full, nsteps=20, n=4000):
+        z_target_full = z_target_full.detach()
+
+        with torch.no_grad():
+            # subsample.
+            if n > z_target_full.shape[1]:
+                n = z_target_full.shape[1]
+            subsample_inds = torch.randperm(z_target_full.shape[1])[:n]
+            z_target = z_target_full[:, subsample_inds, :]
+
+            # compute consecutive OT mappings between keyframes
+            T = z_target.shape[0]            
+            for tt in range(T-1):
+                _fst, _indices = MiscTransforms.OT_registration_POT_2D(z_target[tt, :, :], z_target[tt+1, :, :])
+                z_target[tt+1, :, :] = _fst
+            
+            x_trajs = torch.zeros(n, 2, (T-1)*(nsteps-1)+1)
+            t_trajs = torch.zeros((T-1)*(nsteps-1)+1)
+            
+            # build cubic splines
+            for i in range(n):
+                x = torch.arange(T)
+                y = z_target[:,i,:].cpu()
+                cs = scipyinterpolate.CubicSpline(x,y,axis=0)
+                ys = cs(torch.linspace(0,T-1, (T-1)*(nsteps-1)+1))
+                x_trajs[i,:,:] = torch.tensor(ys).t()
+            
+        return x_trajs, t_trajs, nsteps, T
+    
     
     # get the piecewise W2 interpolation between keyframes. Like waddintonOT, or if the model only performed identity maps.
     def get_OT_trajectory(z_target_full, nsteps=20, n=4000, ot_type=2):
