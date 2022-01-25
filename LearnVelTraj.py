@@ -22,8 +22,10 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
                          n_total=3000, stepsperbatch=50, scaling = .4,normalize=True):
     # dirty hack to maintain compatibility with 2D inputs
     if type(keyMeshes[0]) is torch.Tensor:
+        # 2d case
         meshSamplePoints = keyMeshes
     else:
+        # 3d case
         meshSamplePoints = MeshDataset.meshArrayToPoints(
             keyMeshes, inner_percentage, n_total)
 
@@ -36,7 +38,7 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
                 keyMeshes[i].mesh.vertices = transform(torch.tensor(
                     keyMeshes[i].mesh.vertices).to(device)).cpu().numpy()
     else:
-        z_target_full = meshSamplePoints
+        z_target_full = torch.tensor(meshSamplePoints).to(device).float()
                 
     # normalize to fit in [0,1] box.
     my_loss_f = SamplesLoss("sinkhorn", p=2, blur=0.0001, scaling = scaling)
@@ -217,11 +219,11 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
         # timeIndices = (z_sample[:,0] < ((T-1.)/.001)).detach()
         # pdb.set_trace() 
         regloss = 0 * div2loss.mean() \
-            + 0 * rigid2loss.mean() \
+            + .000 * rigid2loss.mean() \
             + .00 * vgradloss.mean() \
             + .0 * KEloss.mean() \
             + .000 * selfadvectloss.mean() \
-            + 5 * Aloss.mean() \
+            + 0 * Aloss.mean() \
             + .00 * AVloss.mean() \
             + .00 * Kloss.mean() \
             - 0 * torch.clamp(curl2loss.mean(), 0, .02) \
@@ -239,6 +241,12 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
             regloss += .0*(curlvector.mean() + np.pi)**2
             # curl at every part of the trajectory is -pi
             regloss += .0*((curlvector + np.pi)**2).mean()
+        else:
+            regloss += .1*(curlvector.mean(axis=0) + torch.tensor((0,0,-np.pi)).to(device)).norm()**2
+            
+            # curl at every part of the trajectory is [0 -pi 0]
+            targetcurl = torch.tensor((0,-np.pi,0)).repeat(curlvector.shape[0],1).to(device)
+            regloss += .0*((curlvector - targetcurl)**2).mean()
         
         # - 1*torch.clamp(curl2loss[timeIndices].mean(), max = 10**3)  # time negative time-truncated curl energy
         reglosstime = time.time() - cpt
@@ -335,6 +343,9 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
 
     st.save_losses(losses, separate_losses, outfolder=outname, maxcap=10000)
 
+    if dim==3:
+        # dirty code hacks. yuck.
+        n_save_points = 8000
     st.save_trajectory(model, z_target_full, savedir=outname,
                                    savename="final", nsteps=nsteps, n=n_save_points,
                                    dpiv=400, meshArray=keyMeshes)
