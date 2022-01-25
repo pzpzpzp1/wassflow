@@ -7,6 +7,6 @@ results/outcache/*
 results/experiment*
 points.tar
 ToFeydy.ipynb
-
+figures/*
 
 
