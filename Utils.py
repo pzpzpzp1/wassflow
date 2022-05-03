@@ -19,6 +19,7 @@ from scipy.spatial.distance import squareform
 from torch import nn
 import pdb
 import scipy.interpolate as scipyinterpolate
+from meshpy.tet import MeshInfo, build
 
 
 use_cuda = torch.cuda.is_available()
@@ -212,7 +213,29 @@ class MeshDataset():
     def __init__(self, mesh_file):
         self.mesh = trimesh.load(mesh_file)
         self.mesh_file = mesh_file
-
+        self.useCache = False # had a point cache when volume point sampling was painfully slow. now that its based on tet meshing, its super fast and the cache isnt needed.
+        
+        # tet mesh
+        mesh_info = MeshInfo()
+        mesh_info.set_points(self.mesh.vertices)
+        mesh_info.set_facets(self.mesh.faces)
+        tetmesh = build(mesh_info)
+        
+        TV = np.array([val for val in tetmesh.points])
+        TT = np.array([val for val in tetmesh.elements])
+        
+        self.TV = TV;
+        self.TT = TT;
+        v1 = TV[TT[:,0],:]
+        v2 = TV[TT[:,1],:]
+        v3 = TV[TT[:,2],:]
+        v4 = TV[TT[:,3],:]
+        self.tetVols = np.sum(np.cross(v2-v1, v3-v1)*(v4-v1),axis=1);
+        self.tetv1=v1;
+        self.tetv2=v2;
+        self.tetv3=v3;
+        self.tetv4=v4;
+        
     def getCacheName(mesh_file):
         rname, ext = os.path.splitext(mesh_file)
         fname = os.path.basename(rname)
@@ -226,36 +249,41 @@ class MeshDataset():
 
     # saves/loads sampled points
     def sample(self, n_inner=70, n_surface=30, combined=False):
-        # load cache. check for already sampled points.
-        cacheName = MeshDataset.getCacheName(self.mesh_file)
-        if os.path.exists(cacheName):
-            cdict = torch.load(cacheName)
+        if self.useCache:
+            # load cache. check for already sampled points.
+            cacheName = MeshDataset.getCacheName(self.mesh_file)
+            if os.path.exists(cacheName):
+                cdict = torch.load(cacheName)
+            else:
+                cdict = {'pts_inner': np.empty(
+                    (0, 3)), 'pts_surface': np.empty((0, 3))}
+            old_pts_inner = cdict["pts_inner"]
+            old_pts_surface = cdict["pts_surface"]
+
+            # draw point samples to fill cache
+            n_new_pts_inner = max(n_inner - old_pts_inner.shape[0], 0)
+            n_new_pts_surface = max(n_surface - old_pts_surface.shape[0], 0)
+            new_pts_inner, new_pts_surface = self.sample_new(
+                n_inner=n_new_pts_inner, n_surface=n_new_pts_surface)
+
+            # save cache
+            pts_inner = np.append(old_pts_inner, new_pts_inner, axis=0)
+            pts_surface = np.append(old_pts_surface, new_pts_surface, axis=0)
+            if n_new_pts_inner != 0 or n_new_pts_surface != 0:
+                cdict = {'pts_inner': pts_inner, 'pts_surface': pts_surface}
+                torch.save(cdict, cacheName)
+
+            # draw points needed from cache
+            subsample_inds_inner = torch.randperm(pts_inner.shape[0])[:n_inner]
+            subsample_inds_surface = torch.randperm(
+                pts_surface.shape[0])[:n_surface]
+
+            inner_toreturn = pts_inner[subsample_inds_inner, :]
+            surface_toreturn = pts_surface[subsample_inds_surface, :]
         else:
-            cdict = {'pts_inner': np.empty(
-                (0, 3)), 'pts_surface': np.empty((0, 3))}
-        old_pts_inner = cdict["pts_inner"]
-        old_pts_surface = cdict["pts_surface"]
-
-        # draw point samples to fill cache
-        n_new_pts_inner = max(n_inner - old_pts_inner.shape[0], 0)
-        n_new_pts_surface = max(n_surface - old_pts_surface.shape[0], 0)
-        new_pts_inner, new_pts_surface = self.sample_new(
-            n_inner=n_new_pts_inner, n_surface=n_new_pts_surface)
-
-        # save cache
-        pts_inner = np.append(old_pts_inner, new_pts_inner, axis=0)
-        pts_surface = np.append(old_pts_surface, new_pts_surface, axis=0)
-        if n_new_pts_inner != 0 or n_new_pts_surface != 0:
-            cdict = {'pts_inner': pts_inner, 'pts_surface': pts_surface}
-            torch.save(cdict, cacheName)
-
-        # draw points needed from cache
-        subsample_inds_inner = torch.randperm(pts_inner.shape[0])[:n_inner]
-        subsample_inds_surface = torch.randperm(
-            pts_surface.shape[0])[:n_surface]
-
-        inner_toreturn = pts_inner[subsample_inds_inner, :]
-        surface_toreturn = pts_surface[subsample_inds_surface, :]
+            inner_toreturn, surface_toreturn = self.sample_new(
+                n_inner=n_inner, n_surface=n_surface)
+                
         if not combined:
             return inner_toreturn, surface_toreturn
         else:
@@ -263,10 +291,19 @@ class MeshDataset():
 
     def sample_new(self, n_inner=70, n_surface=30):
         pts_surface, _ = trimesh.sample.sample_surface(self.mesh, n_surface)
-        pts_inner = trimesh.sample.volume_mesh(self.mesh, n_inner*10)[:n_inner]
+        pts_inner = self.sample_volume(n_inner)
 
         return pts_inner, pts_surface
-
+    def sample_volume(self, num=100):
+        ntets = self.TT.shape[0];
+        selected = np.random.choice(ntets, size=(num), replace=True, p=self.tetVols/sum(self.tetVols))
+    
+        w = -np.log(np.random.rand(num,4))
+        w = w/np.sum(w,axis=1,keepdims=True)
+        
+        volume_pts = (w[:,0:1]*self.tetv1[selected,:]) + (w[:,1:2]*self.tetv2[selected,:]) + (w[:,2:3]*self.tetv3[selected,:]) + (w[:,3:4]*self.tetv4[selected,:])
+        
+        return volume_pts
     def plotly_trace(self, color=None, opacity=.8):
         X = self.mesh.vertices
         T = self.mesh.faces

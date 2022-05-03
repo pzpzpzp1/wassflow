@@ -219,11 +219,11 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
         # timeIndices = (z_sample[:,0] < ((T-1.)/.001)).detach()
         # pdb.set_trace() 
         regloss = 0 * div2loss.mean() \
-            + .000 * rigid2loss.mean() \
+            + .100 * rigid2loss.mean() \
             + .00 * vgradloss.mean() \
             + .0 * KEloss.mean() \
             + .000 * selfadvectloss.mean() \
-            + 0 * Aloss.mean() \
+            + .1 * Aloss.mean() \
             + .00 * AVloss.mean() \
             + .00 * Kloss.mean() \
             - 0 * torch.clamp(curl2loss.mean(), 0, .02) \
@@ -242,7 +242,7 @@ def learn_vel_trajectory(keyMeshes, n_iters=10, n_subsample=100,
             # curl at every part of the trajectory is -pi
             regloss += .0*((curlvector + np.pi)**2).mean()
         else:
-            regloss += .1*(curlvector.mean(axis=0) + torch.tensor((0,0,-np.pi)).to(device)).norm()**2
+            regloss += .0*(curlvector.mean(axis=0) + torch.tensor((0,0,-np.pi)).to(device)).norm()**2
             
             # curl at every part of the trajectory is [0 -pi 0]
             targetcurl = torch.tensor((0,-np.pi,0)).repeat(curlvector.shape[0],1).to(device)
