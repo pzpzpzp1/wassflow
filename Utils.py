@@ -357,7 +357,7 @@ class MeshDataset():
                 n_inner=n_inner, n_surface=n_surface, combined=False)
 
         if combined:
-            return np.concatenate((pts_inner, pts_surface), axis=1)
+            return np.concatenate((pts_inner, pts_surface), axis=1) 
 
         return pts_inner, pts_surface
 
@@ -525,20 +525,20 @@ class SaveTrajectory():
     def save_trajectory(model, z_target_full, savedir='results/outcache/',
                         savename='', nsteps=20, dpiv=100, n=4000, alpha=.5,
                         ot_type=2, meshArray=None,
-                        rbf=True, sigma=None, knn=20, opt=False):
+                        rbf=True, sigma=None, knn=20, opt=False, reach=None):
         # handler for different dimensions
         if z_target_full.shape[2] == 2:
             return SaveTrajectory.save_trajectory_2d(model, z_target_full, savedir,
                                               savename, nsteps, dpiv, n, alpha,
-                                              ot_type)
+                                              ot_type, reach=reach)
         else:
             return SaveTrajectory.save_trajectory_3d(model, z_target_full, savedir,
                                               savename, nsteps, dpiv, n, alpha,
-                                              ot_type, meshArray=meshArray)
+                                              ot_type, meshArray=meshArray, reach=reach)
 
     def save_trajectory_2d(model, z_target_full, savedir='results/outcache/',
                            savename='', nsteps=20, dpiv=100, n=4000, alpha=.5,
-                           ot_type=2):
+                           ot_type=2, reach=None):
         z_target_full = z_target_full.detach()
 
         with torch.no_grad():
@@ -681,16 +681,20 @@ class SaveTrajectory():
                         plt.scatter(ftp[:, 0], ftp[:, 1], s=10, alpha=alpha,
                                     linewidths=0, c='orange', edgecolors='black')
 
-                        # W2 barycenter combination
-                        if ot_type == 1:
-                            # this registration isn't 1-1 on point clouds. don't know why currently.
-                            fst = MiscTransforms.OT_registration(fs, ft)
-                        elif ot_type == 2:
-                            # full linear program version of OT. slightly slower than geomloss but frankly not that slow compared to other steps in the pipeline.
-                            fst, indices = MiscTransforms.OT_registration_POT_2D(
-                                fs, ft)
+                        if reach is None:
+                            # W2 barycenter combination
+                            if ot_type == 1:
+                                # this registration isn't 1-1 on point clouds. scaling parameter needs to be high enough to get 1-1.
+                                fst = MiscTransforms.OT_registration(fs, ft)
+                            elif ot_type == 2:
+                                # full linear program version of OT. slightly slower than geomloss but frankly not that slow compared to other steps in the pipeline.
+                                fst, indices = MiscTransforms.OT_registration_POT_2D(
+                                    fs, ft)
 
-                        x_traj_t = (fs*(1-ts[i]) + fst*ts[i])
+                            x_traj_t = (fs*(1-ts[i]) + fst*ts[i])
+                        else:
+                            x_traj_t = MiscTransforms.unbalanced_OT_Barycenter(fs, ft, ts[i],reach)
+
                         x_traj = x_traj_t.cpu().numpy()
                         plt.scatter(x_traj[:, 0], x_traj[:, 1], s=10, alpha=alpha,
                                     linewidths=0, c='blue', edgecolors='black')
@@ -975,7 +979,7 @@ class SaveTrajectory():
 
     def save_trajectory_3d(model, z_target_full, savedir='results/outcache/',
                            savename='', nsteps=20, dpiv=100, n=4000, alpha=.2,
-                           ot_type=2, writeTracers=False, meshArray=None):
+                           ot_type=2, writeTracers=False, meshArray=None, reach=None):
         # initialize
         if not os.path.exists(savedir+'models/'):
             os.makedirs(savedir+'models/')
@@ -1090,17 +1094,23 @@ class SaveTrajectory():
                 fsp = fs.cpu().detach().numpy()
                 ftp = ft.cpu().detach().numpy()
 
-                # W2 barycenter combination
-                if ot_type == 1:
-                    # this registration isn't always 1-1 on point clouds.
-                    fst = MiscTransforms.OT_registration(
-                        fs.detach(), ft.detach())
-                elif ot_type == 2:
-                    # full linear program version of OT. slightly slower than geomloss but frankly not that slow compared to other steps in the pipeline.
-                    fst, indices = MiscTransforms.OT_registration_POT_2D(
-                        fs.detach(), ft.detach())
+                
+                
+                if reach is None:
+                    # W2 barycenter combination
+                    if ot_type == 1:
+                        # this registration isn't always 1-1 on point clouds.
+                        fst = MiscTransforms.OT_registration(
+                            fs.detach(), ft.detach())
+                    elif ot_type == 2:
+                        # full linear program version of OT. slightly slower than geomloss but frankly not that slow compared to other steps in the pipeline.
+                        fst, indices = MiscTransforms.OT_registration_POT_2D(
+                            fs.detach(), ft.detach())
 
-                x_traj_t = (fs*(1-ts[i]) + fst*ts[i])
+                    x_traj_t = (fs*(1-ts[i]) + fst*ts[i])
+                else:
+                    x_traj_t = MiscTransforms.unbalanced_OT_Barycenter(fs, ft, ts[i],reach)
+                
                 x_traj = x_traj_t.cpu().detach().numpy()
 
                 x_trajs[:, :, trajsc] = x_traj_t
@@ -1188,7 +1198,24 @@ class MiscTransforms():
             print("SAVED OT REGISTRATION ERROR")
         return z  # , grad_z
 
-    # should work for 3d too actually.
+    # return point cloud minimizing W(src,X)*(1-tw) + W(trg,X)*tw
+    def unbalanced_OT_Barycenter(src, trg, tw, reach):
+        src=src.detach()
+        trg=trg.detach()
+        tw=tw.detach()
+        src.requires_grad = True
+        trg.requires_grad = False
+        
+        X = src;
+        loss_f = SamplesLoss("sinkhorn", p=2, blur=0.0001, scaling = .4, reach=reach)
+        loss = loss_f(src, trg);
+        [grad_src] = torch.autograd.grad(loss, [src])
+        
+        pdb.set_trace()
+        
+        return src
+    
+    # works for 2d and 3d.
     def OT_registration_POT_2D(source, target):
         M = ot.dist(source, target)
         M /= M.max()
