@@ -655,6 +655,7 @@ class SaveTrajectory():
                     x_traj_forward = x_traj_forward_t.cpu().numpy()
 
                     endstep = nsteps if tt == T-2 else nsteps-1
+                    init = None
                     for i in range(endstep):
                         fs = x_traj_forward_t[i, :, :]
                         ft = x_traj_reverse_t[(nsteps-1)-i, :, :]
@@ -693,7 +694,8 @@ class SaveTrajectory():
 
                             x_traj_t = (fs*(1-ts[i]) + fst*ts[i])
                         else:
-                            x_traj_t = MiscTransforms.unbalanced_OT_Barycenter(fs, ft, ts[i],reach)
+                            x_traj_t = MiscTransforms.unbalanced_OT_Barycenter(fs, ft, ts[i],reach,init)
+                            init = x_traj_t
 
                         x_traj = x_traj_t.cpu().numpy()
                         plt.scatter(x_traj[:, 0], x_traj[:, 1], s=10, alpha=alpha,
@@ -1088,6 +1090,7 @@ class SaveTrajectory():
             x_traj_forward = x_traj_forward_t.cpu().detach().numpy()
 
             endstep = nsteps if tt == T-2 else nsteps-1
+            init = None
             for i in range(endstep):
                 fs = x_traj_forward_t[i, :, :]
                 ft = x_traj_reverse_t[(nsteps-1)-i, :, :]
@@ -1109,7 +1112,8 @@ class SaveTrajectory():
 
                     x_traj_t = (fs*(1-ts[i]) + fst*ts[i])
                 else:
-                    x_traj_t = MiscTransforms.unbalanced_OT_Barycenter(fs, ft, ts[i],reach)
+                    x_traj_t = MiscTransforms.unbalanced_OT_Barycenter(fs, ft, ts[i],reach,init,tag=savedir+"fig_"+str(tt)+"_"+str(ts[i].item()))
+                    init = x_traj_t
                 
                 x_traj = x_traj_t.cpu().detach().numpy()
 
@@ -1199,21 +1203,42 @@ class MiscTransforms():
         return z  # , grad_z
 
     # return point cloud minimizing W(src,X)*(1-tw) + W(trg,X)*tw
-    def unbalanced_OT_Barycenter(src, trg, tw, reach):
+    def unbalanced_OT_Barycenter(src, trg, tw, reach, init=None, tag=""):
+        
         src=src.detach()
         trg=trg.detach()
         tw=tw.detach()
-        src.requires_grad = True
+        src.requires_grad = False
         trg.requires_grad = False
+        if init is None:
+            init = src
         
-        X = src;
-        loss_f = SamplesLoss("sinkhorn", p=2, blur=0.0001, scaling = .4, reach=reach)
-        loss = loss_f(src, trg);
-        [grad_src] = torch.autograd.grad(loss, [src])
+        BC = init.detach()
+        BC.requires_grad = True
         
-        pdb.set_trace()
+        Loss = SamplesLoss("sinkhorn", p=2, blur=0.0001, scaling = .8, reach=reach)
+        nits = 100;
+        losses = [];
+        for i in range(nits):
+            l1 = Loss(src, BC);
+            l2 = Loss(BC, trg);
+            loss = l1*(1-tw) + l2*tw;
+            [grad_BC] = torch.autograd.grad(loss, [BC])
+            with torch.no_grad():
+                BC -= grad_BC*1000
+                BC.grad = None
+            losses.append(loss.item())
         
-        return src
+        plt.plot(losses, 'k')
+        plt.savefig(tag+"_fig.png")
+        plt.clf()
+        
+        # np.save(tag+'_src.npy', src.detach().cpu().numpy())
+        # np.save(tag+'_trg.npy', trg.detach().cpu().numpy())
+        # np.save(tag+'_tw.npy', tw.detach().cpu().numpy())
+        # np.save(tag+'_BC.npy', BC.detach().cpu().numpy())
+        # np.save(tag+'_reach.npy', np.array(reach))
+        return BC
     
     # works for 2d and 3d.
     def OT_registration_POT_2D(source, target):
