@@ -1112,8 +1112,10 @@ class SaveTrajectory():
 
                     x_traj_t = (fs*(1-ts[i]) + fst*ts[i])
                 else:
-                    x_traj_t = MiscTransforms.unbalanced_OT_Barycenter(fs, ft, ts[i],reach,init,tag=savedir+"fig_"+str(tt)+"_"+str(ts[i].item()))
-                    init = x_traj_t
+                    ubc_dir_name = savedir+'unbalanced_convergence'
+                    if not os.path.exists(ubc_dir_name):
+                        os.makedirs(ubc_dir_name)
+                    x_traj_t = MiscTransforms.unbalanced_OT_Barycenter(fs, ft, ts[i],reach,init,tag=ubc_dir_name+'/'+savename+"_"+str(tt)+"_"+str(ts[i].item()))
                 
                 x_traj = x_traj_t.cpu().detach().numpy()
 
@@ -1204,21 +1206,26 @@ class MiscTransforms():
 
     # return point cloud minimizing W(src,X)*(1-tw) + W(trg,X)*tw
     def unbalanced_OT_Barycenter(src, trg, tw, reach, init=None, tag=""):
-        
-        src=src.detach()
-        trg=trg.detach()
-        tw=tw.detach()
+            
+        src=src.clone().detach()
+        trg=trg.clone().detach()
+        tw=tw.clone().detach()
         src.requires_grad = False
         trg.requires_grad = False
         if init is None:
-            init = src
+            if tw < .5:
+                init = src
+            else:
+                # init = trg
+                init = src
+                # assymmetry in interpolation possibly due to fixed step size. can mitigate by using consistent initialization.
         
-        BC = init.detach()
+        BC = init.clone().detach()
         BC.requires_grad = True
         
         Loss = SamplesLoss("sinkhorn", p=2, blur=0.0001, scaling = .8, reach=reach)
-        nits = 100;
-        losses = [];
+        nits = 300;
+        losses = [];        
         for i in range(nits):
             l1 = Loss(src, BC);
             l2 = Loss(BC, trg);
