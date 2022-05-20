@@ -559,15 +559,15 @@ class SaveTrajectory():
                 z_target[T-1, :, :], integration_times, reverse=True)
             x_traj_forward_t = model(
                 z_target[0, :, :], integration_times, reverse=False)
-            x_traj_reverse = x_traj_reverse_t.cpu().numpy()
-            x_traj_forward = x_traj_forward_t.cpu().numpy()
+            x_traj_reverse = x_traj_reverse_t.detach().cpu().numpy()
+            x_traj_forward = x_traj_forward_t.detach().cpu().numpy()
 
             allpoints = torch.cat(
                 (x_traj_reverse_t, x_traj_forward_t, z_target), dim=0)
             BB = BoundingBox(allpoints, square=False)
             emic, emac = BB.extendedBB(1.1)
             z_sample = BB.sampleuniform(t_N=1, x_N=20, y_N=20)
-            z_sample_d = z_sample.cpu().numpy()
+            z_sample_d = z_sample.detach().cpu().numpy()
             fig, (ax) = plt.subplots(1, 1)
             
             # forward
@@ -576,8 +576,8 @@ class SaveTrajectory():
                 for i in range(nsteps):
                     for t in range(T):
                         plt.scatter(
-                            z_target.cpu().numpy()[t, :, 0],
-                            z_target.cpu().numpy()[t, :, 1],
+                            z_target.detach().cpu().numpy()[t, :, 0],
+                            z_target.detach().cpu().numpy()[t, :, 1],
                             s=10, alpha=alpha, linewidths=0, c='green',
                             edgecolors='black')
                     x_traj = x_traj_forward
@@ -585,7 +585,7 @@ class SaveTrajectory():
                     # plot velocities
                     z_dots_d = model.velfunc.get_z_dot(
                         z_sample[:, 0]*0.0 + integration_times[i],
-                        z_sample[:, 1:]).cpu().numpy()
+                        z_sample[:, 1:]).detach().cpu().numpy()
                     plt.quiver(z_sample_d[:, 1], z_sample_d[:, 2],
                                z_dots_d[:, 0], z_dots_d[:, 1])
                     plt.scatter(x_traj[i, :, 0], x_traj[i, :, 1], s=10,
@@ -607,8 +607,8 @@ class SaveTrajectory():
                 for i in range(nsteps):
                     for t in range(T):
                         plt.scatter(
-                            z_target.cpu().numpy()[t, :, 0],
-                            z_target.cpu().numpy()[t, :, 1],
+                            z_target.detach().cpu().numpy()[t, :, 0],
+                            z_target.detach().cpu().numpy()[t, :, 1],
                             s=10, alpha=alpha, linewidths=0, c='green',
                             edgecolors='black')
                     x_traj = x_traj_reverse
@@ -616,7 +616,7 @@ class SaveTrajectory():
                     # plot velocities
                     z_dots_d = model.velfunc.get_z_dot(
                         z_sample[:, 0]*0.0 + integration_times[(nsteps-1)-i],
-                        z_sample[:, 1:]).cpu().numpy()
+                        z_sample[:, 1:]).detach().cpu().numpy()
                     plt.quiver(z_sample_d[:, 1],
                                z_sample_d[:, 2], -z_dots_d[:, 0], -z_dots_d[:, 1])
                     plt.scatter(x_traj[i, :, 0], x_traj[i, :, 1], s=10,
@@ -651,8 +651,8 @@ class SaveTrajectory():
                         z_target[tt+1, :, :], integration_times, reverse=True)
                     x_traj_forward_t = model(
                         z_target[tt, indices, :], integration_times, reverse=False)
-                    x_traj_reverse = x_traj_reverse_t.cpu().numpy()
-                    x_traj_forward = x_traj_forward_t.cpu().numpy()
+                    # x_traj_reverse = x_traj_reverse_t.detach().cpu().numpy()
+                    # x_traj_forward = x_traj_forward_t.detach().cpu().numpy()
 
                     endstep = nsteps if tt == T-2 else nsteps-1
                     init = None
@@ -662,21 +662,21 @@ class SaveTrajectory():
 
                         # ground truth keyframes
                         for t in range(T):
-                            plt.scatter(z_target.cpu().numpy()[t, :, 0],
-                                        z_target.cpu().numpy()[t, :, 1],
+                            plt.scatter(z_target.detach().cpu().numpy()[t, :, 0],
+                                        z_target.detach().cpu().numpy()[t, :, 1],
                                         s=10, alpha=alpha, linewidths=0, c='green',
                                         edgecolors='black')
 
                         # plot velocities
                         z_dots_d = model.velfunc.get_z_dot(
                             z_sample[:, 0]*0.0 + integration_times[i],
-                            z_sample[:, 1:]).cpu().numpy()
+                            z_sample[:, 1:]).detach().cpu().numpy()
                         plt.quiver(z_sample_d[:, 1], z_sample_d[:, 2],
                                    z_dots_d[:, 0], z_dots_d[:, 1], lw=.01)
 
                         # forward and backwards separately
-                        fsp = fs.cpu().numpy()
-                        ftp = ft.cpu().numpy()
+                        fsp = fs.detach().cpu().numpy()
+                        ftp = ft.detach().cpu().numpy()
                         plt.scatter(fsp[:, 0], fsp[:, 1], s=10, alpha=alpha,
                                     linewidths=0, c='yellow', edgecolors='black')
                         plt.scatter(ftp[:, 0], ftp[:, 1], s=10, alpha=alpha,
@@ -694,10 +694,13 @@ class SaveTrajectory():
 
                             x_traj_t = (fs*(1-ts[i]) + fst*ts[i])
                         else:
-                            x_traj_t = MiscTransforms.unbalanced_OT_Barycenter(fs, ft, ts[i],reach,init)
-                            init = x_traj_t
-
-                        x_traj = x_traj_t.cpu().numpy()
+                            
+                            ubc_dir_name = savedir+'unbalanced_convergence'
+                            if not os.path.exists(ubc_dir_name):
+                                os.makedirs(ubc_dir_name)
+                            x_traj_t = MiscTransforms.unbalanced_OT_Barycenter(fs, ft, ts[i],reach,init,tag=ubc_dir_name+'/'+savename+"_"+str(tt)+"_"+str(ts[i].item()))
+                    
+                        x_traj = x_traj_t.detach().cpu().numpy()
                         plt.scatter(x_traj[:, 0], x_traj[:, 1], s=10, alpha=alpha,
                                     linewidths=0, c='blue', edgecolors='black')
 
@@ -715,9 +718,12 @@ class SaveTrajectory():
                 moviewriter.finish()
             plt.close(fig)
             
+        # save points as nframes, npoints, dim
+        np.save(savedir+'x_trajs_'+savename+'.npy', x_trajs.permute((2,0,1)).detach().numpy())
+            
         return x_trajs, t_trajs, nsteps, T
     
-    def get_cubic_OT_trajectory(z_target_full, nsteps=20, n=4000):
+    def get_cubic_OT_trajectory(z_target_full, nsteps=20, n=4000, savedir="results/outcache", savename = ""):
         z_target_full = z_target_full.detach()
 
         with torch.no_grad():
@@ -743,12 +749,15 @@ class SaveTrajectory():
                 cs = scipyinterpolate.CubicSpline(x,y,axis=0)
                 ys = cs(torch.linspace(0,T-1, (T-1)*(nsteps-1)+1))
                 x_trajs[i,:,:] = torch.tensor(ys).t()
+                
+        # save points as nframes, npoints, dim
+        np.save(savedir+'x_trajs_'+savename+'.npy', x_trajs.permute((2,0,1)).detach().numpy())
             
         return x_trajs, t_trajs, nsteps, T
     
     
     # get the piecewise W2 interpolation between keyframes. Like waddintonOT, or if the model only performed identity maps.
-    def get_OT_trajectory(z_target_full, nsteps=20, n=4000, ot_type=2):
+    def get_OT_trajectory(z_target_full, nsteps=20, n=4000, ot_type=2, savedir='results/outcache/', savename=''):
         z_target_full = z_target_full.detach()
 
         with torch.no_grad():
@@ -792,7 +801,10 @@ class SaveTrajectory():
                     x_trajs[:, :, trajsc] = x_traj_t
                     t_trajs[trajsc] = integration_times[i]
                     trajsc += 1
-
+        
+        # save points as nframes, npoints, dim
+        np.save(savedir+'x_trajs_'+savename+'.npy', x_trajs.permute((2,0,1)).detach().numpy())
+        
         return x_trajs, t_trajs, nsteps, T
     
     def render_2d(model, z_target_full, xt_trajs, 
@@ -1212,12 +1224,18 @@ class MiscTransforms():
         tw=tw.clone().detach()
         src.requires_grad = False
         trg.requires_grad = False
+        
+        if tw==0:
+            return src
+        elif tw==1:
+            return trg
+        
         if init is None:
             if tw < .5:
                 init = src
             else:
-                # init = trg
-                init = src
+                init = trg
+                # init = src
                 # assymmetry in interpolation possibly due to fixed step size. can mitigate by using consistent initialization.
         
         BC = init.clone().detach()
@@ -1226,16 +1244,22 @@ class MiscTransforms():
         Loss = SamplesLoss("sinkhorn", p=2, blur=0.0001, scaling = .8, reach=reach)
         nits = 300;
         losses = [];        
+        dt = 500;
         for i in range(nits):
+            if i==250:
+                dt/=2
+            
             l1 = Loss(src, BC);
             l2 = Loss(BC, trg);
             loss = l1*(1-tw) + l2*tw;
             [grad_BC] = torch.autograd.grad(loss, [BC])
             with torch.no_grad():
-                BC -= grad_BC*1000
+                BC -= grad_BC*dt
                 BC.grad = None
             losses.append(loss.item())
+            # np.save(tag+'_BC_'+str(i)+'.npy', BC.detach().cpu().numpy())
         
+        plt.figure()
         plt.plot(losses, 'k')
         plt.savefig(tag+"_fig.png")
         plt.clf()
