@@ -19,6 +19,7 @@ from scipy.spatial.distance import squareform
 from torch import nn
 import pdb
 import scipy.interpolate as scipyinterpolate
+from meshpy.tet import MeshInfo, build
 
 
 use_cuda = torch.cuda.is_available()
@@ -212,7 +213,29 @@ class MeshDataset():
     def __init__(self, mesh_file):
         self.mesh = trimesh.load(mesh_file)
         self.mesh_file = mesh_file
-
+        self.useCache = False # had a point cache when volume point sampling was painfully slow. now that its based on tet meshing, its super fast and the cache isnt needed.
+        
+        # tet mesh
+        mesh_info = MeshInfo()
+        mesh_info.set_points(self.mesh.vertices)
+        mesh_info.set_facets(self.mesh.faces)
+        tetmesh = build(mesh_info)
+        
+        TV = np.array([val for val in tetmesh.points])
+        TT = np.array([val for val in tetmesh.elements])
+        
+        self.TV = TV;
+        self.TT = TT;
+        v1 = TV[TT[:,0],:]
+        v2 = TV[TT[:,1],:]
+        v3 = TV[TT[:,2],:]
+        v4 = TV[TT[:,3],:]
+        self.tetVols = np.sum(np.cross(v2-v1, v3-v1)*(v4-v1),axis=1);
+        self.tetv1=v1;
+        self.tetv2=v2;
+        self.tetv3=v3;
+        self.tetv4=v4;
+        
     def getCacheName(mesh_file):
         rname, ext = os.path.splitext(mesh_file)
         fname = os.path.basename(rname)
@@ -226,36 +249,41 @@ class MeshDataset():
 
     # saves/loads sampled points
     def sample(self, n_inner=70, n_surface=30, combined=False):
-        # load cache. check for already sampled points.
-        cacheName = MeshDataset.getCacheName(self.mesh_file)
-        if os.path.exists(cacheName):
-            cdict = torch.load(cacheName)
+        if self.useCache:
+            # load cache. check for already sampled points.
+            cacheName = MeshDataset.getCacheName(self.mesh_file)
+            if os.path.exists(cacheName):
+                cdict = torch.load(cacheName)
+            else:
+                cdict = {'pts_inner': np.empty(
+                    (0, 3)), 'pts_surface': np.empty((0, 3))}
+            old_pts_inner = cdict["pts_inner"]
+            old_pts_surface = cdict["pts_surface"]
+
+            # draw point samples to fill cache
+            n_new_pts_inner = max(n_inner - old_pts_inner.shape[0], 0)
+            n_new_pts_surface = max(n_surface - old_pts_surface.shape[0], 0)
+            new_pts_inner, new_pts_surface = self.sample_new(
+                n_inner=n_new_pts_inner, n_surface=n_new_pts_surface)
+
+            # save cache
+            pts_inner = np.append(old_pts_inner, new_pts_inner, axis=0)
+            pts_surface = np.append(old_pts_surface, new_pts_surface, axis=0)
+            if n_new_pts_inner != 0 or n_new_pts_surface != 0:
+                cdict = {'pts_inner': pts_inner, 'pts_surface': pts_surface}
+                torch.save(cdict, cacheName)
+
+            # draw points needed from cache
+            subsample_inds_inner = torch.randperm(pts_inner.shape[0])[:n_inner]
+            subsample_inds_surface = torch.randperm(
+                pts_surface.shape[0])[:n_surface]
+
+            inner_toreturn = pts_inner[subsample_inds_inner, :]
+            surface_toreturn = pts_surface[subsample_inds_surface, :]
         else:
-            cdict = {'pts_inner': np.empty(
-                (0, 3)), 'pts_surface': np.empty((0, 3))}
-        old_pts_inner = cdict["pts_inner"]
-        old_pts_surface = cdict["pts_surface"]
-
-        # draw point samples to fill cache
-        n_new_pts_inner = max(n_inner - old_pts_inner.shape[0], 0)
-        n_new_pts_surface = max(n_surface - old_pts_surface.shape[0], 0)
-        new_pts_inner, new_pts_surface = self.sample_new(
-            n_inner=n_new_pts_inner, n_surface=n_new_pts_surface)
-
-        # save cache
-        pts_inner = np.append(old_pts_inner, new_pts_inner, axis=0)
-        pts_surface = np.append(old_pts_surface, new_pts_surface, axis=0)
-        if n_new_pts_inner != 0 or n_new_pts_surface != 0:
-            cdict = {'pts_inner': pts_inner, 'pts_surface': pts_surface}
-            torch.save(cdict, cacheName)
-
-        # draw points needed from cache
-        subsample_inds_inner = torch.randperm(pts_inner.shape[0])[:n_inner]
-        subsample_inds_surface = torch.randperm(
-            pts_surface.shape[0])[:n_surface]
-
-        inner_toreturn = pts_inner[subsample_inds_inner, :]
-        surface_toreturn = pts_surface[subsample_inds_surface, :]
+            inner_toreturn, surface_toreturn = self.sample_new(
+                n_inner=n_inner, n_surface=n_surface)
+                
         if not combined:
             return inner_toreturn, surface_toreturn
         else:
@@ -263,10 +291,19 @@ class MeshDataset():
 
     def sample_new(self, n_inner=70, n_surface=30):
         pts_surface, _ = trimesh.sample.sample_surface(self.mesh, n_surface)
-        pts_inner = trimesh.sample.volume_mesh(self.mesh, n_inner*10)[:n_inner]
+        pts_inner = self.sample_volume(n_inner)
 
         return pts_inner, pts_surface
-
+    def sample_volume(self, num=100):
+        ntets = self.TT.shape[0];
+        selected = np.random.choice(ntets, size=(num), replace=True, p=self.tetVols/sum(self.tetVols))
+    
+        w = -np.log(np.random.rand(num,4))
+        w = w/np.sum(w,axis=1,keepdims=True)
+        
+        volume_pts = (w[:,0:1]*self.tetv1[selected,:]) + (w[:,1:2]*self.tetv2[selected,:]) + (w[:,2:3]*self.tetv3[selected,:]) + (w[:,3:4]*self.tetv4[selected,:])
+        
+        return volume_pts
     def plotly_trace(self, color=None, opacity=.8):
         X = self.mesh.vertices
         T = self.mesh.faces
@@ -320,7 +357,7 @@ class MeshDataset():
                 n_inner=n_inner, n_surface=n_surface, combined=False)
 
         if combined:
-            return np.concatenate((pts_inner, pts_surface), axis=1)
+            return np.concatenate((pts_inner, pts_surface), axis=1) 
 
         return pts_inner, pts_surface
 
@@ -488,20 +525,20 @@ class SaveTrajectory():
     def save_trajectory(model, z_target_full, savedir='results/outcache/',
                         savename='', nsteps=20, dpiv=100, n=4000, alpha=.5,
                         ot_type=2, meshArray=None,
-                        rbf=True, sigma=None, knn=20, opt=False):
+                        rbf=True, sigma=None, knn=20, opt=False, reach=None):
         # handler for different dimensions
         if z_target_full.shape[2] == 2:
             return SaveTrajectory.save_trajectory_2d(model, z_target_full, savedir,
                                               savename, nsteps, dpiv, n, alpha,
-                                              ot_type)
+                                              ot_type, reach=reach)
         else:
             return SaveTrajectory.save_trajectory_3d(model, z_target_full, savedir,
                                               savename, nsteps, dpiv, n, alpha,
-                                              ot_type, meshArray=meshArray)
+                                              ot_type, meshArray=meshArray, reach=reach)
 
     def save_trajectory_2d(model, z_target_full, savedir='results/outcache/',
                            savename='', nsteps=20, dpiv=100, n=4000, alpha=.5,
-                           ot_type=2):
+                           ot_type=2, reach=None):
         z_target_full = z_target_full.detach()
 
         with torch.no_grad():
@@ -522,15 +559,15 @@ class SaveTrajectory():
                 z_target[T-1, :, :], integration_times, reverse=True)
             x_traj_forward_t = model(
                 z_target[0, :, :], integration_times, reverse=False)
-            x_traj_reverse = x_traj_reverse_t.cpu().numpy()
-            x_traj_forward = x_traj_forward_t.cpu().numpy()
+            x_traj_reverse = x_traj_reverse_t.detach().cpu().numpy()
+            x_traj_forward = x_traj_forward_t.detach().cpu().numpy()
 
             allpoints = torch.cat(
                 (x_traj_reverse_t, x_traj_forward_t, z_target), dim=0)
             BB = BoundingBox(allpoints, square=False)
             emic, emac = BB.extendedBB(1.1)
             z_sample = BB.sampleuniform(t_N=1, x_N=20, y_N=20)
-            z_sample_d = z_sample.cpu().numpy()
+            z_sample_d = z_sample.detach().cpu().numpy()
             fig, (ax) = plt.subplots(1, 1)
             
             # forward
@@ -539,8 +576,8 @@ class SaveTrajectory():
                 for i in range(nsteps):
                     for t in range(T):
                         plt.scatter(
-                            z_target.cpu().numpy()[t, :, 0],
-                            z_target.cpu().numpy()[t, :, 1],
+                            z_target.detach().cpu().numpy()[t, :, 0],
+                            z_target.detach().cpu().numpy()[t, :, 1],
                             s=10, alpha=alpha, linewidths=0, c='green',
                             edgecolors='black')
                     x_traj = x_traj_forward
@@ -548,7 +585,7 @@ class SaveTrajectory():
                     # plot velocities
                     z_dots_d = model.velfunc.get_z_dot(
                         z_sample[:, 0]*0.0 + integration_times[i],
-                        z_sample[:, 1:]).cpu().numpy()
+                        z_sample[:, 1:]).detach().cpu().numpy()
                     plt.quiver(z_sample_d[:, 1], z_sample_d[:, 2],
                                z_dots_d[:, 0], z_dots_d[:, 1])
                     plt.scatter(x_traj[i, :, 0], x_traj[i, :, 1], s=10,
@@ -570,8 +607,8 @@ class SaveTrajectory():
                 for i in range(nsteps):
                     for t in range(T):
                         plt.scatter(
-                            z_target.cpu().numpy()[t, :, 0],
-                            z_target.cpu().numpy()[t, :, 1],
+                            z_target.detach().cpu().numpy()[t, :, 0],
+                            z_target.detach().cpu().numpy()[t, :, 1],
                             s=10, alpha=alpha, linewidths=0, c='green',
                             edgecolors='black')
                     x_traj = x_traj_reverse
@@ -579,7 +616,7 @@ class SaveTrajectory():
                     # plot velocities
                     z_dots_d = model.velfunc.get_z_dot(
                         z_sample[:, 0]*0.0 + integration_times[(nsteps-1)-i],
-                        z_sample[:, 1:]).cpu().numpy()
+                        z_sample[:, 1:]).detach().cpu().numpy()
                     plt.quiver(z_sample_d[:, 1],
                                z_sample_d[:, 2], -z_dots_d[:, 0], -z_dots_d[:, 1])
                     plt.scatter(x_traj[i, :, 0], x_traj[i, :, 1], s=10,
@@ -614,47 +651,56 @@ class SaveTrajectory():
                         z_target[tt+1, :, :], integration_times, reverse=True)
                     x_traj_forward_t = model(
                         z_target[tt, indices, :], integration_times, reverse=False)
-                    x_traj_reverse = x_traj_reverse_t.cpu().numpy()
-                    x_traj_forward = x_traj_forward_t.cpu().numpy()
+                    # x_traj_reverse = x_traj_reverse_t.detach().cpu().numpy()
+                    # x_traj_forward = x_traj_forward_t.detach().cpu().numpy()
 
                     endstep = nsteps if tt == T-2 else nsteps-1
+                    init = None
                     for i in range(endstep):
                         fs = x_traj_forward_t[i, :, :]
                         ft = x_traj_reverse_t[(nsteps-1)-i, :, :]
 
                         # ground truth keyframes
                         for t in range(T):
-                            plt.scatter(z_target.cpu().numpy()[t, :, 0],
-                                        z_target.cpu().numpy()[t, :, 1],
+                            plt.scatter(z_target.detach().cpu().numpy()[t, :, 0],
+                                        z_target.detach().cpu().numpy()[t, :, 1],
                                         s=10, alpha=alpha, linewidths=0, c='green',
                                         edgecolors='black')
 
                         # plot velocities
                         z_dots_d = model.velfunc.get_z_dot(
                             z_sample[:, 0]*0.0 + integration_times[i],
-                            z_sample[:, 1:]).cpu().numpy()
+                            z_sample[:, 1:]).detach().cpu().numpy()
                         plt.quiver(z_sample_d[:, 1], z_sample_d[:, 2],
                                    z_dots_d[:, 0], z_dots_d[:, 1], lw=.01)
 
                         # forward and backwards separately
-                        fsp = fs.cpu().numpy()
-                        ftp = ft.cpu().numpy()
+                        fsp = fs.detach().cpu().numpy()
+                        ftp = ft.detach().cpu().numpy()
                         plt.scatter(fsp[:, 0], fsp[:, 1], s=10, alpha=alpha,
                                     linewidths=0, c='yellow', edgecolors='black')
                         plt.scatter(ftp[:, 0], ftp[:, 1], s=10, alpha=alpha,
                                     linewidths=0, c='orange', edgecolors='black')
 
-                        # W2 barycenter combination
-                        if ot_type == 1:
-                            # this registration isn't 1-1 on point clouds. don't know why currently.
-                            fst = MiscTransforms.OT_registration(fs, ft)
-                        elif ot_type == 2:
-                            # full linear program version of OT. slightly slower than geomloss but frankly not that slow compared to other steps in the pipeline.
-                            fst, indices = MiscTransforms.OT_registration_POT_2D(
-                                fs, ft)
+                        if reach is None:
+                            # W2 barycenter combination
+                            if ot_type == 1:
+                                # this registration isn't 1-1 on point clouds. scaling parameter needs to be high enough to get 1-1.
+                                fst = MiscTransforms.OT_registration(fs, ft)
+                            elif ot_type == 2:
+                                # full linear program version of OT. slightly slower than geomloss but frankly not that slow compared to other steps in the pipeline.
+                                fst, indices = MiscTransforms.OT_registration_POT_2D(
+                                    fs, ft)
 
-                        x_traj_t = (fs*(1-ts[i]) + fst*ts[i])
-                        x_traj = x_traj_t.cpu().numpy()
+                            x_traj_t = (fs*(1-ts[i]) + fst*ts[i])
+                        else:
+                            
+                            ubc_dir_name = savedir+'unbalanced_convergence'
+                            if not os.path.exists(ubc_dir_name):
+                                os.makedirs(ubc_dir_name)
+                            x_traj_t = MiscTransforms.unbalanced_OT_Barycenter(fs, ft, ts[i],reach,init,tag=ubc_dir_name+'/'+savename+"_"+str(tt)+"_"+str(ts[i].item()))
+                    
+                        x_traj = x_traj_t.detach().cpu().numpy()
                         plt.scatter(x_traj[:, 0], x_traj[:, 1], s=10, alpha=alpha,
                                     linewidths=0, c='blue', edgecolors='black')
 
@@ -672,9 +718,12 @@ class SaveTrajectory():
                 moviewriter.finish()
             plt.close(fig)
             
+        # save points as nframes, npoints, dim
+        np.save(savedir+'x_trajs_'+savename+'.npy', x_trajs.permute((2,0,1)).detach().numpy())
+            
         return x_trajs, t_trajs, nsteps, T
     
-    def get_cubic_OT_trajectory(z_target_full, nsteps=20, n=4000):
+    def get_cubic_OT_trajectory(z_target_full, nsteps=20, n=4000, savedir="results/outcache", savename = ""):
         z_target_full = z_target_full.detach()
 
         with torch.no_grad():
@@ -700,12 +749,15 @@ class SaveTrajectory():
                 cs = scipyinterpolate.CubicSpline(x,y,axis=0)
                 ys = cs(torch.linspace(0,T-1, (T-1)*(nsteps-1)+1))
                 x_trajs[i,:,:] = torch.tensor(ys).t()
+                
+        # save points as nframes, npoints, dim
+        np.save(savedir+'x_trajs_'+savename+'.npy', x_trajs.permute((2,0,1)).detach().numpy())
             
         return x_trajs, t_trajs, nsteps, T
     
     
     # get the piecewise W2 interpolation between keyframes. Like waddintonOT, or if the model only performed identity maps.
-    def get_OT_trajectory(z_target_full, nsteps=20, n=4000, ot_type=2):
+    def get_OT_trajectory(z_target_full, nsteps=20, n=4000, ot_type=2, savedir='results/outcache/', savename=''):
         z_target_full = z_target_full.detach()
 
         with torch.no_grad():
@@ -749,7 +801,10 @@ class SaveTrajectory():
                     x_trajs[:, :, trajsc] = x_traj_t
                     t_trajs[trajsc] = integration_times[i]
                     trajsc += 1
-
+        
+        # save points as nframes, npoints, dim
+        np.save(savedir+'x_trajs_'+savename+'.npy', x_trajs.permute((2,0,1)).detach().numpy())
+        
         return x_trajs, t_trajs, nsteps, T
     
     def render_2d(model, z_target_full, xt_trajs, 
@@ -938,7 +993,7 @@ class SaveTrajectory():
 
     def save_trajectory_3d(model, z_target_full, savedir='results/outcache/',
                            savename='', nsteps=20, dpiv=100, n=4000, alpha=.2,
-                           ot_type=2, writeTracers=False, meshArray=None):
+                           ot_type=2, writeTracers=False, meshArray=None, reach=None):
         # initialize
         if not os.path.exists(savedir+'models/'):
             os.makedirs(savedir+'models/')
@@ -1047,23 +1102,33 @@ class SaveTrajectory():
             x_traj_forward = x_traj_forward_t.cpu().detach().numpy()
 
             endstep = nsteps if tt == T-2 else nsteps-1
+            init = None
             for i in range(endstep):
                 fs = x_traj_forward_t[i, :, :]
                 ft = x_traj_reverse_t[(nsteps-1)-i, :, :]
                 fsp = fs.cpu().detach().numpy()
                 ftp = ft.cpu().detach().numpy()
 
-                # W2 barycenter combination
-                if ot_type == 1:
-                    # this registration isn't always 1-1 on point clouds.
-                    fst = MiscTransforms.OT_registration(
-                        fs.detach(), ft.detach())
-                elif ot_type == 2:
-                    # full linear program version of OT. slightly slower than geomloss but frankly not that slow compared to other steps in the pipeline.
-                    fst, indices = MiscTransforms.OT_registration_POT_2D(
-                        fs.detach(), ft.detach())
+                
+                
+                if reach is None:
+                    # W2 barycenter combination
+                    if ot_type == 1:
+                        # this registration isn't always 1-1 on point clouds.
+                        fst = MiscTransforms.OT_registration(
+                            fs.detach(), ft.detach())
+                    elif ot_type == 2:
+                        # full linear program version of OT. slightly slower than geomloss but frankly not that slow compared to other steps in the pipeline.
+                        fst, indices = MiscTransforms.OT_registration_POT_2D(
+                            fs.detach(), ft.detach())
 
-                x_traj_t = (fs*(1-ts[i]) + fst*ts[i])
+                    x_traj_t = (fs*(1-ts[i]) + fst*ts[i])
+                else:
+                    ubc_dir_name = savedir+'unbalanced_convergence'
+                    if not os.path.exists(ubc_dir_name):
+                        os.makedirs(ubc_dir_name)
+                    x_traj_t = MiscTransforms.unbalanced_OT_Barycenter(fs, ft, ts[i],reach,init,tag=ubc_dir_name+'/'+savename+"_"+str(tt)+"_"+str(ts[i].item()))
+                
                 x_traj = x_traj_t.cpu().detach().numpy()
 
                 x_trajs[:, :, trajsc] = x_traj_t
@@ -1151,7 +1216,62 @@ class MiscTransforms():
             print("SAVED OT REGISTRATION ERROR")
         return z  # , grad_z
 
-    # should work for 3d too actually.
+    # return point cloud minimizing W(src,X)*(1-tw) + W(trg,X)*tw
+    def unbalanced_OT_Barycenter(src, trg, tw, reach, init=None, tag=""):
+            
+        src=src.clone().detach()
+        trg=trg.clone().detach()
+        tw=tw.clone().detach()
+        src.requires_grad = False
+        trg.requires_grad = False
+        
+        if tw==0:
+            return src
+        elif tw==1:
+            return trg
+        
+        if init is None:
+            if tw < .5:
+                init = src
+            else:
+                init = trg
+                # init = src
+                # assymmetry in interpolation possibly due to fixed step size. can mitigate by using consistent initialization.
+        
+        BC = init.clone().detach()
+        BC.requires_grad = True
+        
+        Loss = SamplesLoss("sinkhorn", p=2, blur=0.0001, scaling = .8, reach=reach)
+        nits = 300;
+        losses = [];        
+        dt = 500;
+        for i in range(nits):
+            if i==250:
+                dt/=2
+            
+            l1 = Loss(src, BC);
+            l2 = Loss(BC, trg);
+            loss = l1*(1-tw) + l2*tw;
+            [grad_BC] = torch.autograd.grad(loss, [BC])
+            with torch.no_grad():
+                BC -= grad_BC*dt
+                BC.grad = None
+            losses.append(loss.item())
+            # np.save(tag+'_BC_'+str(i)+'.npy', BC.detach().cpu().numpy())
+        
+        plt.figure()
+        plt.plot(losses, 'k')
+        plt.savefig(tag+"_fig.png")
+        plt.clf()
+        
+        # np.save(tag+'_src.npy', src.detach().cpu().numpy())
+        # np.save(tag+'_trg.npy', trg.detach().cpu().numpy())
+        # np.save(tag+'_tw.npy', tw.detach().cpu().numpy())
+        # np.save(tag+'_BC.npy', BC.detach().cpu().numpy())
+        # np.save(tag+'_reach.npy', np.array(reach))
+        return BC
+    
+    # works for 2d and 3d.
     def OT_registration_POT_2D(source, target):
         M = ot.dist(source, target)
         M /= M.max()
